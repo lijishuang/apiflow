@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APIFlow 智能助手</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="logo"></span>
+    <div class="tt">
+      <b>APIFlow 助手</b>
+      <span id="srvChip" title="点击修改服务地址">127.0.0.1:3300</span>
+    </div>
+  </div>
+  <span class="badge" id="authBadge">连接中…</span>
+  <button class="iconbtn" id="btnReload" title="刷新数据">⟳</button>
+  <button class="iconbtn" id="btnOpenWeb" title="打开 Web 控制台">⧉</button>
+  <button class="iconbtn" id="btnSettings" title="连接设置">⚙</button>
+</header>
+
+<!-- 连接设置 -->
+<div id="settings" class="settings hidden">
+  <div class="frow">
+    <label>服务地址</label>
+    <input id="cfgServer" placeholder="http://127.0.0.1:3300" spellcheck="false" autocomplete="off">
+  </div>
+  <div class="frow">
+    <label>认证方式</label>
+    <div class="seg" id="cfgMode">
+      <button data-m="auto" class="on">跟随平台</button>
+      <button data-m="token">令牌</button>
+      <button data-m="aksk">AK / SK</button>
+    </div>
+  </div>
+  <div class="frow" id="rowToken">
+    <label>令牌（平台「插件接入」里生成）</label>
+    <textarea id="cfgToken" rows="2" placeholder="apf_…" spellcheck="false" autocomplete="off"></textarea>
+  </div>
+  <div class="frow" id="rowAk">
+    <label>AK</label>
+    <input id="cfgAk" placeholder="AKxxxxxxxx" spellcheck="false" autocomplete="off">
+  </div>
+  <div class="frow" id="rowSk">
+    <label>SK（只保存在本机，用于签名 / 换令牌）</label>
+    <input id="cfgSk" type="password" placeholder="至少 16 位" autocomplete="off">
+  </div>
+  <div class="rowbtns">
+    <button id="btnSaveCfg" class="primary">保存并连接</button>
+    <button id="btnLogin">用 AK/SK 换令牌</button>
+  </div>
+  <div class="cfgmsg" id="cfgMsg"></div>
+  <div class="hint" id="cfgHint">「跟随平台」：平台没开认证时直接连接；开了认证自动用 AK/SK 换令牌。</div>
+</div>
+
+<nav class="tabs">
+  <button data-t="chat" class="on">对话</button>
+  <button data-t="flows">流程</button>
+  <button data-t="obs">观测</button>
+</nav>
+
+<main>
+  <!-- ① 对话 -->
+  <section id="tab-chat" class="tabpane on">
+    <div id="chatList">
+      <div class="empty">
+        <div class="et">用一句话执行流程、调试接口</div>
+        <div class="es">与 Web 控制台共用数据，执行过程实时推送到这里</div>
+        <div class="exs">
+          <button data-q="运行供应商准入检查">运行供应商准入检查</button>
+          <button data-q="调试查询库存 SKU-02">调试查询库存 SKU-02</button>
+          <button data-q="查看最近失败运行">最近失败运行</button>
+          <button data-q="平台概况">平台概况</button>
+        </div>
+      </div>
+    </div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="例如：调试查询库存 SKU-02，或 运行供应商准入检查"></textarea>
+      <button id="btnSend" class="primary" title="发送（Enter）">↑</button>
+    </div>
+  </section>
+
+  <!-- ② 流程 -->
+  <section id="tab-flows" class="tabpane">
+    <div class="listbar">
+      <input id="flowFilter" placeholder="过滤流程…">
+      <button class="iconbtn" id="btnFlowsRefresh" title="刷新">⟳</button>
+    </div>
+    <div id="flowList"><div class="loading">加载中…</div></div>
+  </section>
+
+  <!-- ③ 观测 -->
+  <section id="tab-obs" class="tabpane">
+    <div class="listbar">
+      <span class="note" id="obsSummary">—</span>
+      <span style="flex:1"></span>
+      <button class="iconbtn" id="btnObsRefresh" title="刷新">⟳</button>
+    </div>
+    <div id="obsList"><div class="loading">加载中…</div></div>
+    <div id="obsDetail" class="hidden"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="client.js"></script>
+<script src="sidepanel.js"></script>
+</body>
+</html>

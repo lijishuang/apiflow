@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "APIFlow 智能助手",
+  "short_name": "APIFlow",
+  "version": "1.0.0",
+  "description": "用自然语言执行 APIFlow 流程、调试接口；实时查看节点轨迹、请求与响应。与 Web 控制台共用同一份流程与运行数据。",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "alarms", "sidePanel"],
+  "host_permissions": [
+    "http://127.0.0.1:3300/*",
+    "http://localhost:3300/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "APIFlow 智能助手" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

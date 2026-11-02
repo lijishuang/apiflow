@@ -1,0 +1,9 @@
+{
+  "sdk": "mini-sdk",
+  "version": "2.1.0",
+  "baseUrl": "https://api.mini-shop.dev",
+  "operations": [
+    { "id": "listInvoices", "name": "查询发票列表", "method": "GET", "path": "/invoices?status={status}", "readOnly": true, "description": "按状态查询发票" },
+    { "id": "downloadInvoice", "name": "下载发票", "method": "GET", "path": "/invoices/{invoiceId}/file", "readOnly": true, "description": "下载发票 PDF" }
+  ]
+}

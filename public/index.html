@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>APIFlow 平台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand"><span class="logo"></span>APIFlow</span>
+  <div class="tabs" id="tabs">
+    <div class="tab-slider" id="tabSlider"></div>
+    <button class="tab on" data-s="home">首页</button>
+    <button class="tab" data-s="list">流程列表</button>
+    <button class="tab" data-s="api">接口</button>
+    <button class="tab" data-s="build">搭建器</button>
+    <button class="tab" data-s="run">运行观测</button>
+  </div>
+  <span class="env" id="catalogBadge">注册表 · 加载中…</span>
+  <button class="theme-toggle" id="btnPlugin" title="Chrome 插件接入 · 访问令牌" aria-label="插件接入">🧩</button>
+  <button class="theme-toggle" id="themeToggle" title="切换浅色 / 深色主题" aria-label="切换主题">☀️</button>
+  <span class="avatar">李</span>
+</div>
+
+<!-- ═══ 界面 0：首页概览 ═══ -->
+<section id="s-home" class="screen home on">
+  <div class="home-hero">
+    <div>
+      <h2 id="homeHeroTitle">晚上好，这里是 APIFlow 控制台</h2>
+      <p class="note">LLM 只参与搭建，运行时是纯确定性引擎 —— 可重放、零 token 成本。下面是平台的实时概览。</p>
+    </div>
+    <span style="flex:1"></span>
+    <span class="pill" id="homeCatalog" style="background:var(--teal-bg);color:var(--teal)">注册表 · —</span>
+  </div>
+
+  <div class="home-stats" id="homeStats"></div>
+
+  <div class="home-grid">
+    <div class="home-col">
+      <h3 class="sec">最近运行</h3>
+      <table class="optable hometable">
+        <thead><tr><th>流程</th><th>状态</th><th>触发</th><th>耗时</th><th>时间</th></tr></thead>
+        <tbody id="homeRuns"><tr><td colspan="5" class="note">加载中…</td></tr></tbody>
+      </table>
+      <p class="note" style="margin-top:8px"><a onclick="switchTab('run')">→ 前往运行观测查看事件流与运行对比</a></p>
+    </div>
+    <div class="home-col">
+      <h3 class="sec">待处理告警 <span class="note" id="homeAlertCount"></span></h3>
+      <div id="homeAlerts"></div>
+      <h3 class="sec" style="margin-top:22px">快捷入口</h3>
+      <div class="home-quick" id="homeQuick"></div>
+    </div>
+  </div>
+
+  <div class="home-insights">
+    <div class="insight">
+      <h3 class="sec">流程活跃度 <span class="note" id="insFlowSub"></span></h3>
+      <div id="insFlow"><span class="note">加载中…</span></div>
+    </div>
+    <div class="insight">
+      <h3 class="sec">运行表现 <span class="note" id="insPerfSub"></span></h3>
+      <div id="insPerf"><span class="note">加载中…</span></div>
+    </div>
+    <div class="insight">
+      <h3 class="sec">24 小时趋势 <span class="note" id="insTrendSub"></span></h3>
+      <div id="insTrend"><span class="note">加载中…</span></div>
+    </div>
+    <div class="insight">
+      <h3 class="sec">集成与安全</h3>
+      <div id="insInteg"><span class="note">加载中…</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 界面 1：流程列表（左列表 / 右操作面板） ═══ -->
+<section id="s-list" class="screen list">
+  <div class="page-head">
+    <div>
+      <h2>流程</h2>
+      <p class="note">用自然语言创建，画布确认后即为可重复执行的确定性流程 —— 运行阶段不消耗任何模型调用。</p>
+    </div>
+    <span style="flex:1"></span>
+    <button class="btn primary" id="btnNew">＋ 新建流程</button>
+  </div>
+  <div id="alertBox"></div>
+  <div class="list-split">
+    <div class="list-left">
+      <div class="list-toolbar">
+        <span class="note" id="selInfo">未选择流程</span>
+        <span style="flex:1"></span>
+        <button class="btn" id="btnBatchRun" disabled>▶▶ 并行执行</button>
+        <button class="btn" id="btnBatchCmp" disabled>⇄ 批量对比</button>
+        <button class="btn danger" id="btnBatchDel" disabled>✕ 批量删除</button>
+      </div>
+      <div id="batchBar" class="batchbar hidden"></div>
+      <table class="flowtable">
+        <thead><tr><th><input type="checkbox" id="flowAll" title="全选 / 取消全选" aria-label="全选流程"></th><th>流程</th><th>版本</th><th>触发器</th><th>最近运行</th></tr></thead>
+        <tbody id="flowRows"></tbody>
+      </table>
+    </div>
+    <aside class="list-right" id="flowPanel">
+      <div class="panel-empty">
+        <p class="ph-title">流程操作</p>
+        <p class="note">在左侧选择一个流程，这里会显示它可执行的操作：<br>运行 · 查看最近运行 · 编辑画布 · 运行对比定位差异。</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ═══ 界面 2：接口注册表 ═══ -->
+<section id="s-api" class="screen api">
+  <div class="api-head">
+    <div>
+      <h2>接口注册表</h2>
+      <p class="note">接入的接口直接进入智能体的可用工具集 —— 下一轮对话即可用它生成流程；运行期按发布时绑定的版本执行，接口升级只告警不改线上行为。</p>
+    </div>
+    <span style="flex:1"></span>
+    <button class="btn primary" id="btnAddUrl">＋ 接入 OpenAPI 地址</button>
+    <button class="btn" id="btnImportSdk">⇱ 导入 SDK</button>
+    <button class="btn" id="btnAddText">粘贴文档</button>
+    <button class="btn" id="btnAddManual">手工添加</button>
+  </div>
+  <div class="api-stats" id="apiStats"></div>
+
+  <h3 class="sec" style="margin-top:20px">认证凭证（AK / SK）<span class="note" id="credCount"></span>
+    <span style="flex:1"></span><button class="btn" id="btnAddCred">＋ 新建凭证</button></h3>
+  <p class="note" style="margin:-4px 0 9px">凭证可绑定到单个接口，也可设置为某个流程的流程级认证（对该流程所有接口生效）—— 单接口绑定优先于流程级。</p>
+  <div class="srclist" id="credList"></div>
+
+  <h3 class="sec">接口来源
+    <span style="flex:1"></span>
+    <label class="ck-all" title="全选 / 取消全选"><input type="checkbox" id="srcAll"> 全选</label>
+    <span class="note" id="srcSelInfo" style="margin-left:8px"></span>
+    <button class="btn" id="btnSrcBatchDel" disabled style="margin-left:8px">✕ 批量卸载</button>
+  </h3>
+  <div class="srclist" id="srcList"></div>
+
+  <h3 class="sec">帮助手册 <span class="note" id="docCount"></span>
+    <span style="flex:1"></span>
+    <button class="btn" id="btnDocUrl">🔗 通过 URL 抓取</button>
+    <button class="btn" id="btnDocImport">⇱ 导入文档</button>
+  </h3>
+  <p class="note" style="margin:-4px 0 9px">把公网帮助手册（HTML / Markdown / PDF / Word）接进来 —— 搭建器解析自然语言时会引用它：
+    「查一下告警趋势」这类不完整的说法能对上「查询近7天告警趋势」，参数含义、接口调用先后顺序也有据可查。</p>
+  <div class="srclist" id="docList"></div>
+
+  <h3 class="sec">智能体可用接口 <span class="note" id="opCount"></span>
+    <span style="flex:1"></span>
+    <span class="note" id="opSelInfo" style="font-variant-numeric:tabular-nums"></span>
+    <button class="btn" id="btnOpsRestore" style="display:none" title="把删除的内置接口重新放回注册表">↺ 恢复隐藏接口</button>
+    <button class="btn danger" id="btnOpBatchDel" disabled>✕ 批量删除</button>
+  </h3>
+  <div class="opbar">
+    <input id="opFilter" placeholder="按名称 / 路径 / 关键词过滤…">
+    <span class="note">接口内容指纹用于发现“版本号没变但字段被改”的变更</span>
+  </div>
+  <table class="optable">
+    <thead><tr><th class="ck"><input type="checkbox" id="opAll" title="全选 / 取消全选" aria-label="全选接口"></th><th>接口</th><th>方法</th><th>路径</th><th>版本</th><th>指纹</th><th>类型</th><th>认证</th><th>来源</th></tr></thead>
+    <tbody id="opRows"></tbody>
+  </table>
+</section>
+
+<!-- ═══ 界面 3：搭建器 ═══ --><section id="s-build" class="screen builder">
+  <div class="chat" id="buildChat">
+    <h3>流程搭建助手 <span class="aitag">Agent · 仅此处使用 LLM</span></h3>
+    <div class="chat-hint">可用接口 <b id="chatApiCount">—</b> 个 · 📖 手册 <b id="chatDocCount">0</b> 篇 · <a onclick="switchTab('api')">接入 / 管理</a></div>
+    <div class="msgs" id="chatMsgs">
+      <div class="msg agent">描述你想自动化的接口流程，例如：<br>「供应商准入检查：查供应商 S-8891 状态，如果是 ACTIVE 就把分数同步给 ERP，否则标记拒绝」</div>
+    </div>
+    <div class="chat-input">
+      <textarea id="chatText" placeholder="继续描述调整需求，或直接描述一个新流程…"></textarea>
+      <div class="sendrow"><span class="note">生成基于 API 目录（ETag 实时同步）</span><button class="btn primary" id="btnSend">发送</button></div>
+    </div>
+  </div>
+  <div class="vsplit" data-split="chat" role="separator" aria-orientation="vertical" tabindex="0" title="拖动调整左侧面板宽度（双击复位）"></div>
+  <div class="builder-main">
+    <div class="canvas-wrap"><div class="canvas" id="buildCanvas"></div></div>
+    <div class="vsplit" data-split="drawer" role="separator" aria-orientation="vertical" tabindex="0" title="拖动调整右侧面板宽度（双击复位）"></div>
+    <aside class="drawer" id="buildDrawer">
+      <h4>三道闸</h4>
+      <div class="gates" id="gateChips"><span class="gate">① Schema 校验：未执行</span><span class="gate">② Dry-run：未执行</span><span class="gate">③ 人工画布确认</span></div>
+      <h4 style="margin-top:16px">调试</h4>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="btnAutofix">🛠 自动修复问题</button>
+        <button class="btn" id="btnAutoAssert">✓ 自动加断言</button>
+        <button class="btn primary" id="btnDebug">▶ 调试运行（实时数据流）</button>
+      </div>
+      <textarea id="dbgInput" class="dbg-input" placeholder="调试输入（JSON，可选），留空用流程输入示例…"></textarea>
+      <div class="note" id="dbgStatus" style="margin:7px 0 6px"></div>
+      <div class="dbglog" id="dbgLog"><div class="t">—— 调试日志（实时事件流）——</div></div>
+      <p class="note" style="margin-top:7px">调试运行执行只读接口（写操作以桩代替）；断言失败节点会标红，边上实时显示流动的中间数据。</p>
+      <h4 style="margin-top:16px">节点属性</h4>
+      <div id="nodeForm" class="kv"><span class="note">点击画布节点进行编辑</span></div>
+      <div class="btns" style="margin-top:14px;flex-direction:column;display:flex;gap:8px">
+        <button class="btn" id="btnValidate">① Schema 校验</button>
+        <button class="btn" id="btnDryrun">② Dry-run（只读接口试运行）</button>
+        <button class="btn primary" id="btnPublish">③ 保存并发布</button>
+      </div>
+      <p class="note" id="buildNote" style="margin-top:10px"></p>
+    </aside>
+  </div>
+</section>
+
+<!-- ═══ 界面 4：运行观测 ═══ -->
+<section id="s-run" class="screen runner">
+  <div class="toolbar">
+    <select id="runFlowSel" class="sel"></select>
+    <span class="pill" id="runPill">尚未运行</span>
+    <span class="note" id="runMeta"></span>
+    <span style="flex:1"></span>
+    <label class="note">运行历史 <select id="runHist" class="sel"><option>—</option></select></label>
+    <label class="note">对比 <select id="cmpA" class="sel"><option>—</option></select><select id="cmpB" class="sel"><option>—</option></select></label>
+    <button class="btn" id="btnCmp">运行对比</button>
+    <button class="btn primary" id="btnRun">▶ 运行</button>
+  </div>
+  <div class="runner-main">
+    <div class="canvas-wrap"><div class="canvas" id="runCanvas"></div></div>
+    <aside class="drawer" id="runDrawer"><span class="note">点击节点查看请求 / 响应 / 重试记录</span></aside>
+  </div>
+  <div class="eventlog" id="eventLog"><div class="t">—— 事件流（SSE）等待中 ——</div></div>
+</section>
+
+<!-- ═══ 运行对比弹窗 ═══ -->
+<div id="diffModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><b>运行对比（逐节点 diff）</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('diffModal').classList.add('hidden')">关闭</button></div>
+    <div id="diffBody" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- ═══ 接入接口弹窗 ═══ -->
+<div id="srcModal" class="modal hidden">
+  <div class="modal-box" style="width:640px">
+    <div class="modal-head"><b id="srcTitle">接入接口</b><span style="flex:1"></span><button class="btn" id="srcClose">关闭</button></div>
+    <div class="modal-body" id="srcBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 认证凭证弹窗 ═══ -->
+<div id="credModal" class="modal hidden">
+  <div class="modal-box" style="width:560px">
+    <div class="modal-head"><b>新建认证凭证（AK / SK）</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('credModal').classList.add('hidden')">关闭</button></div>
+    <div class="modal-body" id="credBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 导入 SDK 弹窗 ═══ -->
+<div id="sdkModal" class="modal hidden">
+  <div class="modal-box" style="width:760px">
+    <div class="modal-head"><b>导入 SDK（自动分析接口）</b><span style="flex:1"></span><button class="btn" id="sdkClose">关闭</button></div>
+    <div class="modal-body" id="sdkBody"></div>
+  </div>
+</div>
+
+<!-- ═══ SDK 资料库弹窗（接口之外的函数 / 类 / 类型说明，可检索） ═══ -->
+<div id="matModal" class="modal hidden">
+  <div class="modal-box" style="width:820px">
+    <div class="modal-head">
+      <b id="matTitle">SDK 资料</b>
+      <span style="flex:1"></span>
+      <button class="btn" id="matClose">关闭</button>
+    </div>
+    <div class="modal-body" id="matBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 帮助手册：查看自己接进来的手册章节 ═══ -->
+<div id="docModal" class="modal hidden">
+  <div class="modal-box" style="width:660px">
+    <div class="modal-head"><b id="docTitle">接入手册</b><span style="flex:1"></span><button class="btn" id="docClose">关闭</button></div>
+    <div class="modal-body" id="docBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 手册预览 / 检索 ═══ -->
+<div id="docView" class="modal hidden">
+  <div class="modal-box" style="width:860px">
+    <div class="modal-head"><b id="docViewTitle">手册</b><span style="flex:1"></span><button class="btn" id="docViewClose">关闭</button></div>
+    <div class="modal-body" id="docViewBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 并行执行弹窗（多流程并发批跑） ═══ -->
+<div id="batchModal" class="modal hidden">
+  <div class="modal-box" style="width:740px">
+    <div class="modal-head"><b id="batchTitle">并行执行流程</b><span style="flex:1"></span><button class="btn" id="batchClose">关闭</button></div>
+    <div class="modal-body" id="batchBody"></div>
+  </div>
+</div>
+
+<!-- ═══ Chrome 插件接入（令牌 / 认证开关 / 连接配置） ═══ -->
+<div id="pluginModal" class="modal hidden">
+  <div class="modal-box" style="width:720px">
+    <div class="modal-head"><b>Chrome 插件接入</b><span style="flex:1"></span><button class="btn" id="pluginClose">关闭</button></div>
+    <div class="modal-body" id="pluginBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 平台登录（开启「强制认证」后，控制台也需要令牌） ═══ -->
+<div id="loginModal" class="modal hidden">
+  <div class="modal-box" style="width:420px">
+    <div class="modal-head"><b>平台访问认证</b><span style="flex:1"></span><button class="btn" id="loginClose">关闭</button></div>
+    <div class="modal-body" id="loginBody"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

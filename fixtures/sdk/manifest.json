@@ -1,0 +1,33 @@
+{
+  "sdk": "demo-order-sdk",
+  "version": "1.4.0",
+  "baseUrl": "http://127.0.0.1:3300/upstream/_sandbox",
+  "operations": [
+    {
+      "id": "getOrder",
+      "name": "查询订单详情",
+      "method": "GET",
+      "path": "/orders/{orderNo}",
+      "keywords": ["订单", "详情", "查询"],
+      "params": ["orderNo"],
+      "description": "按订单号查询订单详情"
+    },
+    {
+      "id": "applyRefund",
+      "name": "订单退款",
+      "method": "POST",
+      "path": "/orders/{orderNo}/refund",
+      "readOnly": false,
+      "bodyExample": { "amount": 99, "reason": "商品破损" },
+      "description": "对订单发起退款"
+    },
+    {
+      "id": "queryLogistics",
+      "name": "查询物流轨迹",
+      "method": "GET",
+      "path": "/orders/{orderNo}/logistics",
+      "params": ["orderNo"],
+      "description": "查询订单的物流轨迹"
+    }
+  ]
+}
