@@ -181,6 +181,9 @@
     <aside class="drawer" id="buildDrawer">
       <h4>三道闸</h4>
       <div class="gates" id="gateChips"><span class="gate">① Schema 校验：未执行</span><span class="gate">② Dry-run：未执行</span><span class="gate">③ 人工画布确认</span></div>
+      <h4 style="margin-top:16px">认证（流程级）</h4>
+      <select id="draftAuth" class="sel" style="width:100%" title="调试与运行时对该流程所有接口生效"><option value="">无认证</option></select>
+      <p class="note" style="margin:6px 0 0">对该流程内所有接口生效，单接口绑定优先；调试运行同样注入。移动云 OpenAPI 请使用「移动云 V2.0 签名」模式的凭证。</p>
       <h4 style="margin-top:16px">调试</h4>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn" id="btnAutofix">🛠 自动修复问题</button>
@@ -189,6 +192,7 @@
       </div>
       <textarea id="dbgInput" class="dbg-input" placeholder="调试输入（JSON，可选），留空用流程输入示例…"></textarea>
       <div class="note" id="dbgStatus" style="margin:7px 0 6px"></div>
+      <div id="dbgResult"></div>
       <div class="dbglog" id="dbgLog"><div class="t">—— 调试日志（实时事件流）——</div></div>
       <p class="note" style="margin-top:7px">调试运行执行只读接口（写操作以桩代替）；断言失败节点会标红，边上实时显示流动的中间数据。</p>
       <h4 style="margin-top:16px">节点属性</h4>
@@ -303,6 +307,14 @@
   <div class="modal-box" style="width:420px">
     <div class="modal-head"><b>平台访问认证</b><span style="flex:1"></span><button class="btn" id="loginClose">关闭</button></div>
     <div class="modal-body" id="loginBody"></div>
+  </div>
+</div>
+
+<!-- ═══ 数据流动弹窗（节点间传递的数据 + 依赖引用） ═══ -->
+<div id="flowModal" class="modal hidden">
+  <div class="modal-box" style="width:720px">
+    <div class="modal-head"><b id="flowTitle">数据流动</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('flowModal').classList.add('hidden')">关闭</button></div>
+    <div id="flowBody" class="modal-body"></div>
   </div>
 </div>
 

@@ -91,16 +91,32 @@ assert 'list_orders' in ids and len(ids)==base['total'], ids
 " ; chk "恢复隐藏接口后注册表还原" $?
 
 echo "══ T4 引用提示：列出受影响的流程（已发布排前）══"
+# 自建夹具：草稿 → 真实 dry-run 过二道闸 → 发布（不依赖外部流程数据，结束自清理）
 $P -c "
 import json,urllib.request
-r=json.load(urllib.request.urlopen(urllib.request.Request('$B/api/ops/batch-delete',
-  data=json.dumps({'ids':['query_supplier'],'preview':True}).encode(),headers={'content-type':'application/json'})))
+def req(u,d=None,method=None):
+    r=urllib.request.Request('$B'+u,data=json.dumps(d).encode() if d is not None else None,
+      headers={'content-type':'application/json'},method=method)
+    return json.load(urllib.request.urlopen(r))
+DEF={'id':'flow_ops_fix','name':'OPS引用夹具','version':0,
+ 'input':{'schema':{'type':'object'},'sample':{'supplierId':'S-8891'}},
+ 'nodes':[{'id':'start','type':'start','name':'开始','config':{}},
+          {'id':'q','type':'http','name':'查询供应商','operationId':'query_supplier','apiVersion':'v2026.10',
+           'config':{'method':'GET','url':'http://127.0.0.1:3300/upstream/suppliers/S-8891'}}],
+ 'edges':[{'from':'start','to':'q'}]}
+req('/api/flows/flow_ops_fix/draft',{'def':DEF})
+dry=req('/api/flows/flow_ops_fix/dry-run',{})            # 真实执行过二道闸
+assert dry['status']=='success', dry
+pub=req('/api/flows/flow_ops_fix/publish',{'def':DEF,'confirm':True})
+assert pub['ok'] and pub['version']>=1, pub
+r=req('/api/ops/batch-delete',{'ids':['query_supplier'],'preview':True})
 aff=r['affected']
 assert aff, r
-assert aff[0]['published'] is True, aff[:3]           # 已发布流程优先展示
-hit=[a for a in aff if a['id']=='flow_supplier']
+assert aff[0]['published'] is True, aff[:3]              # 已发布流程优先展示
+hit=[a for a in aff if a['id']=='flow_ops_fix']
 assert hit and hit[0]['nodes']==['查询供应商'] and hit[0]['version']>=1, aff[:3]
-" ; chk "预览列出引用该接口的流程与节点" $?
+req('/api/flows/flow_ops_fix/delete',None,'DELETE') if False else urllib.request.urlopen(urllib.request.Request('$B/api/flows/flow_ops_fix',method='DELETE')).read()
+" ; chk "预览列出引用该接口的流程与节点（自建夹具）" $?
 
 echo "══ T5 参数校验 ══"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $B/api/ops/batch-delete -H 'content-type: application/json' -d '{"ids":[]}')

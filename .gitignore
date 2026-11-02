@@ -21,3 +21,6 @@ Thumbs.db
 tmp/
 .tmp/
 *.tmp
+
+# ── 本地工作目录（WorkBuddy 会话记忆等，仅本机）──────────────
+.workbuddy/

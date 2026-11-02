@@ -79,6 +79,7 @@ _tabs.forEach(t => t.addEventListener('click', () => {
   if (t.dataset.s === 'list') loadFlows();
   if (t.dataset.s === 'api') loadApi();
   if (t.dataset.s === 'run') refreshRunFlows();
+  if (t.dataset.s === 'build') { ensureCreds().then(syncDraftAuth); }   // 搭建器：认证下拉需要凭证列表
 }));
 window.addEventListener('resize', moveSlider);
 window.addEventListener('load', moveSlider);
@@ -362,8 +363,11 @@ function renderFlowPanel() {
     </div>
     <div class="panel-sec">
       <p class="ph-label">执行</p>
-      <button class="btn primary wide" id="fpRun" ${f.version > 0 ? '' : 'disabled'}>▶ 运行此流程</button>
-      <button class="btn wide" id="fpOpen" ${f.version > 0 ? '' : 'disabled'}>查看运行观测</button>
+      ${f.version > 0
+        ? `<button class="btn primary wide" id="fpRun">▶ 运行此流程</button>
+           <button class="btn wide" id="fpOpen">查看运行观测</button>`
+        : `<button class="btn primary wide" id="fpRun" title="未发布流程不能直接运行 —— 点击载入搭建器完成三道闸">⚠ 未发布 · 去搭建器完成发布</button>
+           <p class="note" style="margin-top:8px">未发布流程不能运行 —— 先到搭建器完成三道闸（① Schema 校验 → ② Dry-run → ③ 画布确认发布），发布后即可在此运行。</p>`}
       <button class="btn wide" id="fpEdit">编辑画布</button>
     </div>
     <div class="panel-sec">
@@ -384,8 +388,12 @@ function renderFlowPanel() {
       <p class="ph-label">最近运行</p>
       <div id="fpRuns"><span class="note">加载中…</span></div>
     </div>`;
-  $('#fpRun').onclick = () => runFlow(f.id);
-  $('#fpOpen').onclick = () => openRun(f.id);
+  if (f.version > 0) {
+    $('#fpRun').onclick = () => runFlow(f.id);
+    $('#fpOpen').onclick = () => openRun(f.id);
+  } else {
+    $('#fpRun').onclick = () => editFlow(f.id);   // 未发布：点击进搭建器完成三道闸，而非禁用无反馈
+  }
   $('#fpEdit').onclick = () => editFlow(f.id);
   $('#fpCmp').onclick = () => compareLast(f.id, $('#fpCmpResult'));
   loadRunsMini(f.id);
@@ -686,12 +694,12 @@ function renderCanvas(el, def, mode, runState) {
       label.setAttribute('text-anchor', 'middle');
       svg.appendChild(label);
     }
-    // 数据 chip（边中点）
+    // 数据 chip（边中点）：显示上游→下游的流动数据，点击看完整数据与依赖关系
     const chip = document.createElement('div');
-    chip.className = 'chip'; chip.style.display = 'none';
+    chip.className = 'chip dflow'; chip.style.display = 'none';
     chip.dataset.edge = e.from + '->' + e.to;
-    chip.title = '字段来源：节点 ' + e.from + ' 的输出';
-    chip.onclick = () => { if (chip.dataset.full) showProvenance(e.from, chip.dataset.full); };
+    chip.title = '上游输出的流动数据 —— 点击查看完整数据与字段依赖';
+    chip.onclick = () => { if (chip.dataset.full) showDataFlow(e.from, e.to, chip.dataset.full); };
     el.appendChild(chip);
 
     const rec = { from: e.from, to: e.to, path, label, chip };
@@ -814,6 +822,110 @@ function showProvenance(fromNode, dataJson) {
   alert('字段级来源溯源\n\n来源节点：' + fromNode + '\n\n输出数据：\n' + dataJson);
 }
 
+/* ───────── 运行结果与数据流动：结果卡 · JSON 高亮 · 依赖扫描 ───────── */
+/* JSON 语法高亮（key 蓝 / 字符串绿 / 数字琥珀 / 布尔紫，跟随主题变量）——
+   先按词法切分再逐段 esc：直接 esc 整体会把引号变 &quot; 导致字符串匹配失效 */
+function hlJson(v) {
+  const json = JSON.stringify(v, null, 2) ?? 'null';
+  const re = /"(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(json))) {
+    out += esc(json.slice(last, m.index));
+    let cls = 'j-num';
+    if (m[0].startsWith('"')) cls = m[0].endsWith(':') ? 'j-key' : 'j-str';
+    else if (m[0] === 'true' || m[0] === 'false') cls = 'j-bool';
+    else if (m[0] === 'null') cls = 'j-null';
+    out += `<span class="${cls}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(json.slice(last));
+}
+/* 流程汇点：没有出边的节点（多分支可有多个终点，全部视为结果出口） */
+function resultEndpoints(def) {
+  const hasOut = new Set((def.edges || []).map(e => e.from));
+  const ends = (def.nodes || []).filter(n => n.type !== 'start' && !hasOut.has(n.id));
+  return ends.length ? ends : (def.nodes || []).filter(n => n.type !== 'start');
+}
+/* 按点路径取值（'entity.0.productName'），不存在的路径返回 undefined */
+function lookupPath(obj, path) {
+  return String(path || '').split('.').filter(Boolean).reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+/* 扫描节点间模板引用 {{nodes.X.output...}}：upstream=本节点引用了谁，downstream=谁引用了本节点 */
+const REF_RE = /\{\{\s*nodes\.([a-zA-Z0-9_]+)\.(output[^}]*)\}\}/g;
+function scanRefs(def, nodeId) {
+  const cfgText = n => { try { return JSON.stringify(n.config || {}); } catch { return ''; } };
+  const byId = Object.fromEntries((def.nodes || []).map(n => [n.id, n]));
+  const me = byId[nodeId];
+  const upstream = [], downstream = [];
+  if (me) {
+    for (const m of (JSON.stringify(me.config || {})).matchAll(REF_RE)) if (m[1] !== nodeId) upstream.push({ from: m[1], expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2] });
+  }
+  for (const n of def.nodes || []) {
+    if (n.id === nodeId) continue;
+    for (const m of (JSON.stringify(n.config || {})).matchAll(REF_RE)) if (m[1] === nodeId) downstream.push({ node: n.id, nodeName: n.name, expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2] });
+  }
+  return { upstream, downstream };
+}
+/* 结果卡：突出显示流程最终输出（汇点节点的完整响应），失败时红卡显示错误 */
+function renderResultCard(def, runNodes, meta = {}) {
+  const nodesById = Object.fromEntries((def.nodes || []).map(n => [n.id, n]));
+  const ok = meta.status === 'success';
+  const failedNode = Object.entries(runNodes || {}).find(([, r]) => r.status === 'failed');
+  const ends = resultEndpoints(def).map(n => ({ n, rec: (runNodes || {})[n.id] || {} }));
+  const withOut = ends.filter(x => x.rec.output != null);
+  const head = `
+    <div class="result-head">
+      <span class="pill" style="background:${ok ? 'var(--ok-bg);color:var(--ok)' : 'var(--bad-bg);color:var(--bad)'}">${ok ? '✓ 运行成功' : '✗ 运行' + (meta.status === 'running' ? '中' : '失败')}</span>
+      <b>流程返回结果</b>
+      ${meta.durationMs != null ? `<span class="note">${fmtDur(meta.durationMs)}</span>` : ''}
+      <span style="flex:1"></span>
+      ${withOut.length ? `<button class="btn" data-copy-result>⧉ 复制 JSON</button>` : ''}
+    </div>`;
+  let body;
+  if (failedNode) {
+    const [nid, rec] = failedNode;
+    body = `<div class="result-node"><span class="badge" style="background:var(--bad-bg);color:var(--bad)">✗</span><b>${esc((nodesById[nid] || {}).name || nid)}</b><span class="note">${nid}</span></div>
+      <div class="code" style="border-color:var(--red-line);color:var(--bad)">${esc(rec.error || '节点失败')}</div>
+      ${ends.filter(x => x.rec.output != null).length ? '<p class="note" style="margin:8px 0 0">失败前的已完成节点输出仍可在画布上点击节点查看。</p>' : ''}`;
+  } else if (withOut.length) {
+    body = withOut.map(x => `
+      <div class="result-node"><span class="badge" style="background:var(--ok-bg);color:var(--ok)">OUT</span><b>${esc(x.n.name)}</b><span class="note">${x.n.id}${x.rec.ms != null ? ' · ' + x.rec.ms + 'ms' : ''}</span></div>
+      <div class="code result-json">${hlJson(x.rec.output)}</div>`).join('')
+      + `<p class="note" style="margin:8px 0 0">以上为流程终点节点的完整返回 —— 中间节点的输出可点击画布节点或边上的数据 chip 查看。</p>`;
+  } else {
+    body = '<p class="note">终点节点尚无输出。</p>';
+  }
+  return `<div class="result-card ${ok ? '' : 'bad'}">${head}${body}</div>`;
+}
+
+/* 数据流动弹窗：边上传递的数据 + 下游对上游字段的引用关系 */
+function showDataFlow(from, to, dataJson, def) {
+  def = def || state.draft || state.def || { nodes: [], edges: [] };
+  const byId = Object.fromEntries((def.nodes || []).map(n => [n.id, n]));
+  $('#flowTitle').textContent = `数据流动：${(byId[from] || {}).name || from} → ${(byId[to] || {}).name || to}`;
+  const refs = scanRefs(def, to).upstream.filter(u => u.from === from);
+  $('#flowBody').innerHTML = `
+    <p class="note">边上的数据是上游节点 <b>${esc(byId[from] ? byId[from].name : from)}</b> 的输出，执行时会作为下游节点 <b>${esc(byId[to] ? byId[to].name : to)}</b> 的默认输入 —— 下游可用 <code>{{nodes.${esc(from)}.output…}}</code> 精确引用其中的字段。</p>
+    <b style="font-size:12px;color:var(--muted)">传递的数据（完整）</b>
+    <div class="code result-json">${hlJson(tryParse(dataJson))}</div>
+    <b style="font-size:12px;color:var(--muted);display:block;margin-top:12px">依赖关系</b>
+    ${refs.length ? `<table class="dep-table"><thead><tr><th>下游节点引用的上游字段</th><th>实际值</th></tr></thead>
+      <tbody>${refs.map(r => `<tr><td><code>${esc(r.expr)}</code></td><td class="num">${esc(JSON.stringify(lookupPath(tryParse(dataJson), r.path.replace(/^output\.?/, ''))) ?? '—')}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="note">下游节点没有直接引用本节点输出的具体字段（当前是把上游输出整包作为默认输入）。</p>'}`;
+  $('#flowModal').classList.remove('hidden');
+}
+/* 结果卡「复制 JSON」：事件委托（结果卡在搭建器与运行观测两处出现） */
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-copy-result]');
+  if (!b) return;
+  const box = b.closest('.result-card') && b.closest('.result-card').querySelector('.result-json');
+  if (!box) return;
+  navigator.clipboard.writeText(box.textContent).then(() => {
+    b.textContent = '✓ 已复制';
+    setTimeout(() => { b.textContent = '⧉ 复制 JSON'; }, 1500);
+  }).catch(() => {});
+});
+
 /* ───────── 界面 2：搭建器 ───────── */
 function switchTab(s) { document.querySelector(`.tab[data-s="${s}"]`).click(); }
 
@@ -912,6 +1024,36 @@ function renderBuildCanvas() {
   state.canvasMode = 'edit';
   if (state.draft) renderCanvas($('#buildCanvas'), state.draft, 'edit');
 }
+/* ── 搭建器：流程级认证（调试 / 运行共用同一 authId 解析） ── */
+const credModeLabel = m => m === 'ecloud' ? '移动云 V2.0 签名' : m === 'header' ? '头直传' : 'HMAC 签名';
+async function ensureCreds() {           // 搭建器页也需要凭证列表（流程列表页之外进入时兜底加载）
+  if (state.creds && state.creds.length) return;
+  try {
+    const d = await api('/api/creds');
+    state.creds = d.items; state.opBindings = d.opBindings || {};
+  } catch { /* 无凭证时下拉仅剩「无认证」 */ }
+}
+function syncDraftAuth() {               // 把草稿的 authId 反映到下拉框
+  const sel = $('#draftAuth');
+  if (!sel) return;
+  if (!sel.options.length || sel.options.length !== (state.creds || []).length + 1) {
+    sel.innerHTML = '<option value="">无认证</option>' +
+      (state.creds || []).map(c => `<option value="${c.id}">${esc(c.name)}（${credModeLabel(c.mode)}）</option>`).join('');
+  }
+  sel.value = (state.draft && state.draft.authId) || '';
+}
+$('#draftAuth').onchange = async e => {
+  if (!state.draft) { e.target.value = ''; return alert('请先生成或载入草稿'); }
+  const authId = e.target.value || null;
+  state.draft.authId = authId;
+  try {
+    await api(`/api/flows/${state.draftFlowId}/auth`, { method: 'POST', body: JSON.stringify({ authId }) });
+    $('#buildNote').textContent = authId ? '✓ 已设置流程级认证，调试 / Dry-run / 正式运行均会注入' : '已清除流程级认证';
+  } catch (err) {
+    $('#buildNote').textContent = '认证设置失败：' + err.message;
+  }
+};
+
 function renderGates() {
   const g = state.draft && state.draft.gates || {};
   const chip = (label, gk, okTxt) => {
@@ -925,6 +1067,7 @@ function renderGates() {
     chip('① Schema 校验', 'schema', g.schema && g.schema.ok ? '通过' + (g.schema.warnings.length ? '，' + g.schema.warnings.length + ' 警告' : '') : '') +
     chip('② Dry-run', 'dryRun', '通过') +
     (g.confirm && g.confirm.ok ? '<span class="gate ok">✓ ③ 人工画布确认</span>' : '<span class="gate wait">● ③ 等待人工画布确认</span>');
+  syncDraftAuth();                         // 草稿变化（生成 / 载入 / 修复）后同步认证下拉
 }
 // 认不出接口时给几个「也许你想说」，点一下填回输入框，不用重打
 function addSuggestions(list) {
@@ -1099,6 +1242,7 @@ $('#btnDebug').onclick = async () => {
   const runId = 'run_dbg_' + Date.now().toString(36);
   state.debugRun = { id: runId, nodes: {}, status: 'running' };
   $('#dbgLog').innerHTML = '';
+  $('#dbgResult').innerHTML = '';
   $('#dbgStatus').innerHTML = '<span style="color:var(--blue)">调试运行中…（事件实时显示在下方）</span>';
   renderBuildCanvas();
   try {
@@ -1108,8 +1252,10 @@ $('#btnDebug').onclick = async () => {
     paintRunState($('#buildCanvas'), state.draft, state.debugRun);
     const nFail = Object.values(r.nodes || {}).filter(x => x.status === 'failed').length;
     $('#dbgStatus').innerHTML = r.status === 'success'
-      ? `<span style="color:var(--ok)">✓ 调试通过（run ${esc(r.runId)}）—— 点击节点可查看中间数据</span>`
-      : `<span style="color:var(--bad)">✗ 调试完成，${nFail} 个节点失败 —— 详情见日志与节点属性</span>`;
+      ? `<span style="color:var(--ok)">✓ 调试通过（run ${esc(r.runId)}）—— 结果见下方，点击节点 / 边可查看中间数据</span>`
+      : `<span style="color:var(--bad)">✗ 调试完成，${nFail} 个节点失败 —— 详情见结果卡与日志</span>`;
+    // 结果卡：流程终点节点的完整返回（dry-run 响应带全量输出）
+    $('#dbgResult').innerHTML = renderResultCard(state.draft, r.nodes, { status: r.status, runId: r.runId });
     if (r.status === 'success') { state.draft.gates = { ...(state.draft.gates || {}), dryRun: { ok: true, runId: r.runId } }; renderGates(); }
   } catch (e) {
     state.debugRun = null;
@@ -1159,10 +1305,16 @@ async function loadRun(runId) {
   paintRunState($('#runCanvas'), state.def, run);
   renderRunHead(run);
   $('#eventLog').innerHTML = (run.events || []).map(fmtEvent).join('') || '<div class="t">（该 run 无事件记录）</div>';
-  if (run.nodes && Object.keys(run.nodes).length) {
-    const firstDone = Object.entries(run.nodes).find(([k, v]) => v.status === 'done' || v.status === 'reused');
-    if (firstDone) showRunDrawer(firstDone[0]);
-  }
+  if (run.nodes && Object.keys(run.nodes).length) showRunResult(run);   // 默认先看流程返回结果，节点详情点画布节点
+}
+/* 运行观测右栏：流程返回结果卡（终点节点的完整输出） */
+function showRunResult(run) {
+  if (!state.def || !run) return;
+  const anyOut = Object.values(run.nodes || {}).some(r => r.output != null);
+  $('#runDrawer').innerHTML = `
+    ${renderResultCard(state.def, run.nodes, { status: run.status, durationMs: run.durationMs, num: run.num })}
+    <p class="note" style="margin-top:10px">点击画布上的<b>节点</b>查看该节点的请求 / 响应与数据依赖；点击<b>边上的数据 chip</b> 查看节点间流动的数据。</p>
+    ${run.input && Object.keys(run.input).length ? `<b style="font-size:12px;color:var(--muted)">本次运行输入</b><div class="code" style="max-height:140px">${hlJson(run.input)}</div>` : ''}`;
 }
 function renderRunHead(run) {
   $('#runPill').textContent = `#${run.num} · ${run.status === 'running' ? '运行中' : run.status === 'success' ? '成功' : run.status}`;
@@ -1180,7 +1332,11 @@ function paintRunState(el, def, run) {
     const cls = { done: 'st-ok', reused: 'st-ok', running: 'st-run', failed: 'st-fail', skipped: 'st-skip', queue: 'st-queue' }[st] || 'st-queue';
     div.className = 'node ' + cls;
     const meta = div.querySelector('.meta');
-    if (st === 'done' || st === 'reused') meta.innerHTML = `<span style="color:var(--ok)">✓ ${rec.httpStatus || ''}</span><span class="note">${rec.ms != null ? rec.ms + 'ms' : ''} ${rec.reused ? '· 复用产物' : ''}</span>`;
+    if (st === 'done' || st === 'reused') {
+      const prev = rec.output != null ? String(typeof rec.output === 'string' ? rec.output : JSON.stringify(rec.output)) : '';
+      meta.innerHTML = `<span style="color:var(--ok)">✓ ${rec.httpStatus || ''}</span><span class="note">${rec.ms != null ? rec.ms + 'ms' : ''} ${rec.reused ? '· 复用产物' : ''}</span>`
+        + (prev ? `<span class="oprev" title="${esc(prev)}">${esc(prev.slice(0, 64))}</span>` : '');
+    }
     else if (st === 'running') meta.innerHTML = '<span style="color:var(--blue)">运行中…</span>';
     else if (st === 'failed') meta.innerHTML = `<span style="color:var(--bad)">✗ ${esc((rec.error || '').slice(0, 40))}</span>`;
     else if (st === 'skipped') meta.innerHTML = '<span class="note">分支未命中</span>';
@@ -1243,7 +1399,15 @@ function connectSSE() {
       if (!def) return;
       if (p.event === 'node_start') { run.nodes[p.data.node] = { status: 'running' }; }
       if (p.event === 'node_end') { run.nodes[p.data.node] = { status: p.data.status === 'done' ? 'done' : p.data.status, httpStatus: p.data.httpStatus, ms: p.data.ms, error: p.data.error, attempts: p.data.attempts, output: tryParse(p.data.output) }; }
-      if (p.event === 'run_end') { run.status = p.data.status; }
+      if (p.event === 'run_end') {
+        run.status = p.data.status; run.durationMs = p.data.durationMs;
+        // run_end 时 SSE 里的节点输出是 160 字摘要 —— 拉一次完整 run 记录，刷新结果卡
+        api('/api/runs/' + run.id).then(full => {
+          run.nodes = full.nodes || run.nodes;
+          paintRunState($('#runCanvas'), def, run);
+          showRunResult(run);
+        }).catch(() => showRunResult(run));
+      }
       paintRunState($('#runCanvas'), def, run);
       // 边流动动画 + chip
       if (p.event === 'edge_data') {
@@ -1274,9 +1438,12 @@ async function showRunDrawer(nodeId, run) {
   const n = (state.def.nodes.find(x => x.id === nodeId)) || {};
   const attempts = rec.attempts && rec.attempts.length ? rec.attempts : [];
   const catOk = n.apiVersion ? await catalogOk(n.apiVersion) : '';
+  // 节点间数据依赖：本节点引用了哪些上游输出、本节点输出被哪些下游引用
+  const { upstream, downstream } = scanRefs(state.def, nodeId);
+  const outVal = path => lookupPath(rec.output, String(path || '').replace(/^output\.?/, ''));
   $('#runDrawer').innerHTML = `
     <h4>${esc(n.name || nodeId)}<span style="flex:1"></span><span class="dot" style="background:${rec.status === 'done' || rec.status === 'reused' ? 'var(--ok)' : rec.status === 'running' ? 'var(--blue)' : rec.status === 'failed' ? 'var(--bad)' : 'var(--queue)'}"></span></h4>
-    <div class="note">节点 ${nodeId} ｜ run #${run.num} ｜ ${rec.reused ? '复用产物（重放）' : rec.status || ''}</div>
+    <div class="note">节点 ${nodeId} ｜ run #${run.num} ｜ ${rec.reused ? '复用产物（重放）' : rec.status || ''}　<button class="btn" id="btnBackResult" style="padding:1px 9px;font-size:12px">◀ 运行结果</button></div>
     <div class="kv">
       ${rec.httpStatus ? `<b>状态</b><span style="color:${rec.httpStatus === 200 || rec.status === 'done' ? 'var(--ok)' : 'var(--bad)'}">${rec.httpStatus === 200 ? '200 OK' : rec.httpStatus}</span>` : ''}
       ${rec.ms != null ? `<b>耗时</b><span>${rec.ms} ms</span>` : ''}
@@ -1284,15 +1451,22 @@ async function showRunDrawer(nodeId, run) {
       ${n.apiVersion ? `<b>API 版本</b><span>${esc(n.apiVersion)} ${catOk}</span>` : ''}
       ${n.idempotencyKey ? `<b>幂等键</b><span style="font-family:Menlo,monospace;font-size:11px">${esc(n.idempotencyKey)}</span>` : ''}
     </div>
+    ${(upstream.length || downstream.length) ? `<b style="font-size:12px;color:var(--muted);display:block;margin-top:10px">数据流动 · 依赖关系</b>
+    <div class="deps">
+      ${upstream.map(u => { const v = lookupPath((run.nodes[u.from] || {}).output, u.path.replace(/^output\.?/, '')); return `<div class="dep-row" title="点击查看来源节点"><b>← ${esc(u.from)}</b><span><code>${esc(u.expr)}</code>${v !== undefined ? ` = <span class="num">${esc(JSON.stringify(v)).slice(0, 60)}</span>` : ' <span class="note">（运行时取值）</span>'}</span></div>`; }).join('')}
+      ${downstream.map(d => `<div class="dep-row" title="本节点输出被下游引用"><b>→ ${esc(d.node)}</b><span><code>${esc(d.expr)}</code></span></div>`).join('')}
+    </div>
+    <p class="note" style="margin:5px 0 0">← 表示本节点引用的上游输出；→ 表示本节点输出被下游引用的字段。</p>` : ''}
     ${attempts.length ? `<b style="font-size:12px;color:var(--muted)">重试记录（${attempts.length} 次）</b>
       <table style="font-size:11px;margin:6px 0"><thead><tr><th>#</th><th>状态</th><th>耗时</th><th>结果</th></tr></thead>
       <tbody>${attempts.map(a => `<tr><td>${a.n}</td><td>${a.status || '-'}</td><td>${a.ms}ms</td><td style="color:${a.ok ? 'var(--ok)' : 'var(--bad)'}">${a.ok ? '成功' : esc(a.error || 'HTTP ' + a.status)}</td></tr>`).join('')}</tbody></table>` : ''}
-    ${rec.output ? `<b style="font-size:12px;color:var(--muted)">响应</b><div class="code">${esc(JSON.stringify(rec.output, null, 1))}</div>` : rec.error ? `<b style="font-size:12px;color:var(--muted)">错误</b><div class="code" style="background:var(--bad-bg);color:var(--bad)">${esc(rec.error)}</div>` : ''}
+    ${rec.output ? `<b style="font-size:12px;color:var(--muted)">本节点输出（完整响应）</b><div class="code result-json" style="max-height:320px">${hlJson(rec.output)}</div>` : rec.error ? `<b style="font-size:12px;color:var(--muted)">错误</b><div class="code" style="background:var(--bad-bg);color:var(--bad)">${esc(rec.error)}</div>` : ''}
     <div class="btns">
       <button class="btn primary" id="btnReplay">↻ 从此节点重放</button>
       ${rec.output ? '<button class="btn" id="btnRaw">原始 payload</button>' : ''}
     </div>
     <p class="note" style="margin-top:10px">重放将复用上游已存产物，仅重新执行本节点及下游。</p>`;
+  $('#btnBackResult').onclick = () => showRunResult(run);
   $('#btnReplay').onclick = async () => {
     try {
       const r = await api(`/api/runs/${run.id}/replay`, { method: 'POST', body: JSON.stringify({ fromNode: nodeId }) });
@@ -1911,7 +2085,7 @@ function renderCreds() {
   const boundCount = cid => Object.values(state.opBindings || {}).filter(id => id === cid).length;
   $('#credList').innerHTML = state.creds.length ? state.creds.map(c => `
     <div class="srccard">
-      <div class="h">${esc(c.name)}<span style="flex:1"></span><span class="vtag">${c.mode === 'hmac' ? 'HMAC 签名' : '头直传'}</span></div>
+      <div class="h">${esc(c.name)}<span style="flex:1"></span><span class="vtag">${credModeLabel(c.mode)}</span></div>
       <div class="m">AK：${esc(c.ak)}</div>
       <div class="m">SK：${esc(c.sk)}（已掩码）</div>
       <div class="m">已绑定 ${boundCount(c.id)} 个接口 · 创建于 ${new Date(c.createdAt).toLocaleString('zh-CN')}</div>
@@ -1921,11 +2095,11 @@ function renderCreds() {
 }
 function openCredModal() {
   $('#credBody').innerHTML = `
-    <div class="form-tip">两种模式：<b>HMAC 签名</b>——请求头带 AK + 时间戳 + HMAC-SHA256 签名（SK 不出网，推荐）；<b>头直传</b>——AK/SK 直接放请求头（简单但 SK 暴露在头里，仅限内网）。</div>
+    <div class="form-tip">三种模式：<b>HMAC 签名</b>——请求头带 AK + 时间戳 + HMAC-SHA256 签名（SK 不出网，推荐，适合平台自有受保护接口）；<b>头直传</b>——AK/SK 直接放请求头（简单但 SK 暴露在头里，仅限内网）；<b>移动云 V2.0 签名</b>——与移动云 OpenAPI 官方网关对齐的 AK/SK 签名（认证参数放 query），调用 ecloud 接口选这个。</div>
     <div class="form-row"><label>凭证名称</label><input id="c-name" placeholder="例如：生产网关凭证"></div>
     <div class="form-row"><label>AK（留空自动生成）</label><input id="c-ak" placeholder="AKxxxxxxxx"></div>
     <div class="form-row"><label>SK（留空自动生成，至少 16 位）</label><input id="c-sk" type="password" placeholder="留空自动生成"></div>
-    <div class="form-row"><label>模式</label><select id="c-mode"><option value="hmac">HMAC 签名（推荐）</option><option value="header">头直传</option></select></div>
+    <div class="form-row"><label>模式</label><select id="c-mode"><option value="hmac">HMAC 签名（推荐）</option><option value="header">头直传</option><option value="ecloud">移动云 V2.0 签名</option></select></div>
     <div id="credMsg"></div>
     <div class="modal-foot"><button class="btn" id="credCancel">取消</button><button class="btn primary" id="credSubmit">创建凭证</button></div>`;
   $('#credCancel').onclick = () => $('#credModal').classList.add('hidden');

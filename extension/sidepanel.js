@@ -8,6 +8,7 @@ const S = {
   cfg: null, tab: 'chat',
   server: null,            // /api/ext/ping 结果
   boot: null,              // /api/ext/bootstrap
+  defs: {},                // flowId -> def（结果卡汇点 / 依赖扫描用）
   msgs: [],                // 对话消息 {id, role, text, plan, runId, traceId, el}
   traces: {},              // traceId -> {runId, flowName, status, nodes, events, input, durationMs, meta}
   obsSel: null,            // 观测页当前展开的 runId
@@ -27,6 +28,99 @@ const fmtAgo = ts => {
 };
 const TRIG = { manual: '手动', schedule: '定时', webhook: 'Webhook', replay: '重放', batch: '并行', 'dry-run': '调试', agent: '插件', 'api-debug': '接口调试' };
 const KIND = { 'run-flow': '运行流程', 'debug-op': '调试接口', 'draft-flow': '生成新流程', query: '查询平台', error: '没听懂' };
+
+/* ───────── 结果卡 · JSON 高亮 · 依赖扫描（与 Web 控制台同款逻辑） ───────── */
+function tryParse(s) { try { return JSON.parse(s); } catch { return s; } }
+/* JSON 语法高亮：先按词法切分再逐段 esc，直接 esc 整体会把引号变 &quot; 导致匹配失效 */
+function hlJson(v) {
+  const json = JSON.stringify(v, null, 2) ?? 'null';
+  const re = /"(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(json))) {
+    out += esc(json.slice(last, m.index));
+    let cls = 'j-num';
+    if (m[0].startsWith('"')) cls = m[0].endsWith(':') ? 'j-key' : 'j-str';
+    else if (m[0] === 'true' || m[0] === 'false') cls = 'j-bool';
+    else if (m[0] === 'null') cls = 'j-null';
+    out += `<span class="${cls}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(json.slice(last));
+}
+/* 按点路径取值（'entity.0.productName'） */
+function lookupPath(obj, path) {
+  return String(path || '').split('.').filter(Boolean).reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+/* 扫描节点间模板引用 {{nodes.X.output...}} */
+const REF_RE = /\{\{\s*nodes\.([a-zA-Z0-9_]+)\.(output[^}]*)\}\}/g;
+function scanRefs(def, nodeId) {
+  const upstream = [], downstream = [];
+  const me = (def.nodes || []).find(n => n.id === nodeId);
+  if (me) for (const m of JSON.stringify(me.config || {}).matchAll(REF_RE)) if (m[1] !== nodeId) upstream.push({ from: m[1], expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2] });
+  for (const n of def.nodes || []) {
+    if (n.id === nodeId) continue;
+    for (const m of JSON.stringify(n.config || {}).matchAll(REF_RE)) if (m[1] === nodeId) downstream.push({ node: n.id, nodeName: n.name, expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2] });
+  }
+  return { upstream, downstream };
+}
+/* 流程汇点：没有出边的节点（多分支可有多个终点） */
+function resultEndpoints(def) {
+  const hasOut = new Set((def.edges || []).map(e => e.from));
+  const ends = (def.nodes || []).filter(n => n.type !== 'start' && !hasOut.has(n.id));
+  return ends.length ? ends : (def.nodes || []).filter(n => n.type !== 'start');
+}
+/* 结果卡：突出显示流程终点节点的完整返回 */
+function resultCardHTML(t) {
+  const def = t.def;
+  if (!def) return '';
+  const runNodes = t.nodes || {};
+  const ok = t.status === 'success';
+  const failed = Object.entries(runNodes).find(([, r]) => r.status === 'failed');
+  const ends = resultEndpoints(def).map(n => ({ n, rec: runNodes[n.id] || {} }));
+  const withOut = ends.filter(x => x.rec.output != null);
+  const head = `
+    <div class="result-head">
+      <span class="rpill ${ok ? 'ok' : t.status === 'running' ? 'run' : 'bad'}">${ok ? '✓ 成功' : t.status === 'running' ? '◐ 运行中' : '✗ 失败'}</span>
+      <b>流程返回结果</b>
+      ${t.durationMs != null && t.status !== 'running' ? `<span class="rms">${fmtMs(t.durationMs)}</span>` : ''}
+      <span style="flex:1"></span>
+      ${withOut.length ? '<button class="rcopy" data-copy-result>⧉ 复制</button>' : ''}
+    </div>`;
+  let body;
+  if (failed && !withOut.length) {
+    const [nid, rec] = failed;
+    const nm = ((def.nodes || []).find(n => n.id === nid) || {}).name || nid;
+    body = `<div class="result-node"><span class="rbadge bad">✗</span><b>${esc(nm)}</b><span class="rms">${esc(nid)}</span></div>
+      <pre class="result-json bad-text">${esc(rec.error || '节点失败')}</pre>`;
+  } else if (withOut.length) {
+    body = withOut.map(x => `
+      <div class="result-node"><span class="rbadge ok">OUT</span><b>${esc(x.n.name)}</b><span class="rms">${esc(x.n.id)}${x.rec.ms != null ? ' · ' + fmtMs(x.rec.ms) : ''}</span></div>
+      <pre class="result-json">${hlJson(x.rec.output)}</pre>`).join('');
+  } else {
+    body = '<div class="listnote" style="padding:6px 0 2px">终点节点尚无输出</div>';
+  }
+  return `<div class="result-card ${ok ? '' : 'bad'}">${head}${body}</div>`;
+}
+/* 节点详情：数据流动 · 依赖关系（引用了上游哪些字段 + 运行时实际取值） */
+function depHTML(t, id) {
+  const def = t.def;
+  if (!def) return '';
+  const { upstream, downstream } = scanRefs(def, id);
+  const runNodes = t.nodes || {};
+  const name = nid => ((def.nodes || []).find(n => n.id === nid) || {}).name || nid;
+  const ups = upstream.map(u => {
+    const v = lookupPath((runNodes[u.from] || {}).output, u.path.replace(/^output\.?/, ''));
+    return `<div class="dep-row"><b>← ${esc(name(u.from))}</b><span><code>${esc(u.expr)}</code>${v !== undefined ? ` = <span class="num">${esc(JSON.stringify(v)).slice(0, 60)}</span>` : ' <i>运行时取值</i>'}</span></div>`;
+  });
+  const downs = downstream.map(d => `<div class="dep-row"><b>→ ${esc(name(d.node))}</b><span><code>${esc(d.expr)}</code></span></div>`);
+  // 没有模板引用、整包把上游输出当默认输入的边：用 SSE edge_data 摘要补足流动信息
+  const refFrom = new Set(upstream.map(u => u.from));
+  const flowIn = (t.edges || []).filter(e => e.to === id && !refFrom.has(e.from))
+    .map(e => `<div class="dep-row"><b>⇠ ${esc(name(e.from))}</b><span><code>${esc(typeof e.data === 'string' ? e.data : JSON.stringify(e.data))}</code></span></div>`);
+  if (!ups.length && !downs.length && !flowIn.length) return '';
+  return `<h5>数据流动 · 依赖关系</h5><div class="deps">${ups.join('')}${flowIn.join('')}${downs.join('')}</div>
+    <div class="hint" style="font-size:10.5px;padding:0">← 本节点引用的上游输出 · → 本节点输出被下游引用</div>`;
+}
 
 /* ── 对话持久化：侧边栏关闭再打开不丢轨迹 ── */
 const CHAT_KEY = 'apiflow.chat';
@@ -169,6 +263,7 @@ function applyEvent(t, event, d) {
 }
 
 // run 结束后拉完整运行记录：SSE 里的 output 是截断摘要，请求/响应细节要看全量
+// 顺带取流程定义 —— 结果卡找汇点、依赖扫描都依赖 def
 async function hydrateTrace(t) {
   const r = await APF.request('/api/runs/' + t.runId);
   if (!r.ok) return;
@@ -180,6 +275,13 @@ async function hydrateTrace(t) {
   }
   t.order = Object.keys(run.nodes || {});
   t.events = run.events || [];
+  if (run.flowId) {
+    if (!S.defs[run.flowId]) {
+      const dr = await APF.request('/api/flows/' + run.flowId + '/def');
+      if (dr.ok && dr.data.def) S.defs[run.flowId] = dr.data.def;
+    }
+    t.def = S.defs[run.flowId] || null;
+  }
   paintTrace(t);
   if (S.obsSel === t.runId) renderObsDetail(t.runId);
 }
@@ -238,6 +340,7 @@ function traceHTML(t) {
         <span class="sp"></span>
         <a data-web="${esc(t.runId)}">Web 查看</a>
       </div>
+      ${t.def ? resultCardHTML(t) : ''}
       <div class="nodes">${rows || '<div class="listnote">等待节点事件…</div>'}</div>
       ${errLine}
       ${evs ? `<div class="evlog">${evs}</div>` : ''}
@@ -270,7 +373,8 @@ function paintTrace(t) {
 
 function nodeDetailHTML(t, id) {
   const n = t.nodes[id] || {};
-  const out = n.output != null ? (() => { try { return JSON.stringify(typeof n.output === 'string' ? JSON.parse(n.output) : n.output, null, 1); } catch { return String(n.output); } })() : '—';
+  const hasOut = n.output != null;
+  const outObj = hasOut ? tryParse(typeof n.output === 'string' ? n.output : n.output) : null;
   const tries = (n.attempts || []).map(a => `  第${a.n}次 · ${a.status || '—'} · ${a.ms}ms${a.error ? ' · ' + a.error : ''}`).join('\n');
   return `<div class="ndetail" data-node="${esc(id)}">
     ${n.error ? `<div class="errline">✕ ${esc(n.error)}</div>` : ''}
@@ -279,9 +383,26 @@ function nodeDetailHTML(t, id) {
     ${n.auth ? `<h5>认证</h5><pre>${esc(n.auth)}</pre>` : ''}
     ${n.request ? `<h5>请求 / 响应</h5><pre>${esc(JSON.stringify(n.request, null, 1))}</pre>` : ''}
     ${tries ? `<h5>重试记录</h5><pre>${esc(tries)}</pre>` : ''}
-    <h5>输出</h5><pre>${esc(out)}</pre>
+    ${depHTML(t, id)}
+    <h5>输出${hasOut ? '（完整响应）' : ''}</h5><pre class="${hasOut ? 'result-json' : ''}">${hasOut ? hlJson(outObj) : '—'}</pre>
   </div>`;
 }
+
+/* 结果卡「复制」：事件委托（轨迹卡在对话与观测详情两处出现） */
+document.addEventListener('click', async e => {
+  const b = e.target.closest && e.target.closest('[data-copy-result]');
+  if (!b) return;
+  const traceEl = b.closest('.trace');
+  const t = traceEl && S.traces[traceEl.dataset.trace];
+  if (!t || !t.def) return;
+  const ends = resultEndpoints(t.def).filter(n => ((t.nodes || {})[n.id] || {}).output != null);
+  if (!ends.length) return;
+  const payload = ends.length === 1
+    ? t.nodes[ends[0].id].output
+    : Object.fromEntries(ends.map(n => [n.name || n.id, t.nodes[n.id].output]));
+  try { await navigator.clipboard.writeText(JSON.stringify(payload, null, 2)); toast('已复制返回结果 JSON'); }
+  catch { toast('复制失败', true); }
+});
 
 /* ───────── 对话 ───────── */
 function pushMsg(m) {

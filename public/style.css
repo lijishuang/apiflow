@@ -185,6 +185,42 @@ body.col-resizing iframe,body.col-resizing .canvas{pointer-events:none}
 .code{background:var(--terminal);color:#C9D5E8;border:1px solid var(--line-soft);border-radius:var(--radius);padding:10px 12px;font:12.5px/1.65 var(--font-mono);overflow:auto;white-space:pre;max-height:220px}
 .drawer .btns{display:flex;gap:8px;margin-top:12px}
 
+/* ───────── 运行结果卡 / 数据流动 ───────── */
+.result-card{border:1.5px solid var(--ok);background:var(--ok-bg);border-radius:var(--radius-l);padding:12px 14px;margin:10px 0;box-shadow:var(--shadow-s)}
+.result-card.bad{border-color:var(--bad);background:var(--bad-bg)}
+.result-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.result-head b{font-size:14px}
+.result-head .pill{font-size:12.5px;padding:2px 9px}
+.result-node{display:flex;align-items:center;gap:7px;font-size:12.5px;margin:9px 0 5px;color:var(--ink-2)}
+.result-node b{color:var(--ink)}
+.result-node .badge{font:600 10px/1 var(--font-mono);padding:3px 6px;border-radius:5px}
+.result-json{max-height:320px}
+.result-json .j-key{color:var(--blue)}
+.result-json .j-str{color:var(--teal)}
+.result-json .j-num{color:var(--amber)}
+.result-json .j-bool{color:var(--purple)}
+.result-json .j-null{color:var(--muted)}
+:root[data-theme="light"] .result-json .j-key{color:#2E6FBE}
+:root[data-theme="light"] .result-json .j-str{color:#18855A}
+:root[data-theme="light"] .result-json .j-num{color:#A8721A}
+:root[data-theme="light"] .result-json .j-bool{color:#6B4FD8}
+/* 节点上的输出预览（meta 第二行） */
+.oprev{display:block;font:10.5px/1.5 var(--font-mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;margin-top:2px}
+/* 节点间数据依赖（节点详情抽屉） */
+.deps{display:flex;flex-direction:column;gap:4px;margin-top:5px}
+.dep-row{display:flex;gap:8px;align-items:baseline;font-size:12px;background:var(--bg2);border:1px solid var(--line-soft);border-radius:8px;padding:5px 9px}
+.dep-row b{font:600 11px var(--font-mono);color:var(--teal);white-space:nowrap}
+.dep-row code{font:11px var(--font-mono);color:var(--ink-2);word-break:break-all}
+.dep-row .num{font-family:var(--font-mono);font-size:11px}
+/* 数据流依赖表（弹窗内） */
+.dep-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+.dep-table th{font-size:11.5px;color:var(--muted);text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)}
+.dep-table td{padding:5px 8px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.dep-table code{font:11.5px var(--font-mono);color:var(--ink-2)}
+/* 边上的数据 chip：数据流动高亮态 */
+.chip.dflow{border-color:var(--teal-line);background:var(--teal-bg);color:var(--teal);font-size:12px}
+.chip.dflow:hover{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-bg)}
+
 /* ───────── 运行观测 ───────── */
 .runner{flex-direction:column;height:calc(100vh - 54px)}
 .runner-main{flex:1;display:flex;overflow:hidden}
@@ -303,7 +339,11 @@ tbody tr:hover{background:var(--bg2)}
 .api-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px}
 .api-head h2{font-size:21px;font-weight:700;letter-spacing:-.015em;margin-bottom:3px}
 .api-head .note{max-width:620px}
-.api-stats{display:flex;gap:10px;margin:14px 0 6px;flex-wrap:wrap}
+.api-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0 10px}
+.api-stats .stat{min-width:0;padding:20px 22px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+.api-stats .stat b{font-size:36px;line-height:1.2}
+.api-stats .stat span{font-size:15.5px;margin-top:4px}
+@media (max-width:1100px){ .api-stats{grid-template-columns:repeat(2,1fr)} }
 .stat{background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--radius);padding:10px 16px;min-width:120px;box-shadow:var(--shadow-s)}
 .stat b{display:block;font-size:21px;font-weight:700;line-height:1.35;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .stat span{font-size:14.5px;color:var(--muted)}
