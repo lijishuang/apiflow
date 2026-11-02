@@ -1,0 +1,88 @@
+name: 🐛 缺陷报告
+description: 有东西没按预期工作（报错、结果不对、卡住）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先确认：**贴出的日志、截图、参数里不要有 AK/SK、token、内网地址**。
+        可以先用 `curl http://127.0.0.1:3300/api/health` 确认服务本身是活的。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 一句话说清现象，不要只写「报错了」
+      placeholder: 在搭建器里输入「把订单同步到供应商系统」，返回 422，提示……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expect
+    attributes:
+      label: 你期望什么
+      placeholder: 应该生成 3 个节点的草稿（查询订单 → 转换字段 → 通知供应商）
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 能从空数据复现最好；不能的话说明前置数据是怎么来的
+      value: |
+        1. 启动 `node server.js`
+        2. 打开 http://127.0.0.1:3300
+        3. 在「接口」页 …
+        4. 在搭建器输入 …
+        5. 看到 …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 出问题的模块
+      multiple: true
+      options:
+        - 自然语言搭建 / 匹配（lib/agent.js, lib/match.js）
+        - 流程执行引擎（lib/engine.js）
+        - 接口接入：OpenAPI / 手工（lib/openapi.js）
+        - SDK / pip / 压缩包导入（lib/sdk.js, lib/pip.js, lib/archive.js）
+        - 帮助手册（lib/docs.js）
+        - 观测面板 / 前端（public/）
+        - Chrome 插件（extension/）
+        - 认证与凭证（lib/auth.js, lib/access.js）
+        - 回归脚本本身
+        - 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: Node 版本 + 操作系统 + 浏览器（如果涉及前端）
+      placeholder: Node 22.22.0 / macOS 15.1 / Chrome 141
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 服务端 stdout、浏览器 Console、或截图（拖进来即可）。请先脱敏
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已经用最新 `main` 试过
+          required: true
+        - label: 已经确认内容里没有凭证、token、内网地址
+          required: true
+        - label: 搜过现有 Issue，没有重复
+          required: true

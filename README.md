@@ -1,8 +1,24 @@
 # APIFlow 平台 —— 自然语言构建可复用接口流程
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)
+![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
+![tests](https://img.shields.io/badge/tests-243%20passing-success)
+![PRs](https://img.shields.io/badge/PRs-welcome-blue)
+
 根据《APIFlow 平台系统设计图》完整实现的可运行系统。**LLM 只参与搭建，运行时是纯确定性引擎**（可重放、零 token 成本）。
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="APIFlow 架构：LLM 只参与搭建，运行期纯确定性" width="100%">
+</p>
+
+| | |
+|---|---|
+| **运行观测**：节点四色状态、边数据流动画、字段级来源溯源、两次 run 逐节点 diff | **接口注册表**：OpenAPI / SDK / pip / 归档 / 帮助手册五条通道接入，版本与内容指纹绑定 |
+| ![运行观测](screenshots/final-run.png) | ![接口注册表](screenshots/api-3-registry.png) |
+
 ## 启动
+
 
 ```bash
 node server.js          # 零依赖，Node 22+（内置 fetch / AbortController）
@@ -206,10 +222,23 @@ node test-ui.js         # 前端三界面自动化（需 playwright；NODE_PATH 
 node test-sources-ui.js # 前端「接口接入」链路自动化（空态→接入→注册表→搭建器可用）
 ```
 
-最近一轮：**认证 22 + 注册表批量删除 16 + 调试 26 + 全链路 e2e 12 + SDK 资料库 9 + pip 11 + SDK 导入 21 + 接入 9 + 压缩包/文件夹 12 + Chrome 插件 64 全部通过（共 202 项，并行批跑 32 项需 ≥4 条已发布流程另测）。测试套件已全部「种子自保障」：不依赖平台里的用户数据，自建夹具、退出自动清理还原。**
+最近一轮：**自然语言 20 + 帮助手册 21 + 全链路 e2e 12 + Chrome 插件 64 + 认证 22 + 注册表批量删除 16 + pip 11 + SDK 导入 21 + 压缩包 12 + 调试 26 + 资料库 9 + 接入 9 全部通过（共 243 项；并行批跑 32 项需 ≥4 条已发布流程另测）。测试套件已全部「种子自保障」：不依赖平台里的用户数据，自建夹具、退出自动清理还原。**
 
 ## 设计对齐说明
 
 - 「转换 JQ」实现为轻量表达式转换（取值/组装/映射），循环节点为 `over + 嵌入式 HTTP 请求` 形态；如需完整 JQ 可替换 `renderDeep`。
 - NL 解析为确定性规则实现（意图切分 + 目录关键词匹配 + 中式比较符映射），**接入真实 LLM 只需替换 `lib/agent.js` 的 `buildDraft`**，三道闸机制不变。
 - 演示目录版本变更：`POST /api/admin/catalog-bump`（v2026.10 → v2026.11），告警出现在流程列表页。
+
+## 安全与隐私
+
+所有数据都在本机 `data/` 目录，不上传任何服务端。`data/creds.json` 里的 AK/SK 是**明文**，`data/runs.json` 是请求响应全量快照——这两处已列入 `.gitignore`，任何情况下不要提交。部署建议（不要直接暴露公网、凭证轮换、存储层替换）见 [SECURITY.md](SECURITY.md)。
+
+## 贡献
+
+欢迎提 Issue 与 PR。提交前请读 [CONTRIBUTING.md](CONTRIBUTING.md)（提交信息格式、回归要求、以及本项目的一条底线：运行期不引入 LLM、随机与隐式重试）。问题模板在 [.github/ISSUE_TEMPLATE](.github/ISSUE_TEMPLATE/)。
+
+## License
+
+[MIT](LICENSE) © 2026 lijishuang
+

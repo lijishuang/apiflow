@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔐 安全漏洞（请勿公开）
+    url: https://github.com/lijishuang/apiflow/security/advisories/new
+    about: 涉及凭证、认证、数据泄露的问题请走私密报告，不要在 Issue 里贴细节。
+  - name: 📖 使用文档
+    url: https://github.com/lijishuang/apiflow#readme
+    about: 启动方式、接口接入的五条通道、Chrome 插件安装，都写在 README 里。
