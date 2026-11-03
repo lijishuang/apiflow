@@ -785,12 +785,62 @@ function renderCanvas(el, def, mode, runState) {
     if (mode === 'edit') enableDrag(div, canvas, n.id);
     el.appendChild(div);
   }
+
+  // 虚拟「结束」终点：出度为 0 的非 start 节点就是流程出口，从各出口引虚线汇到这里。
+  // end 只是展示 —— 不进 DSL、不参与校验/执行/保存；拖出口节点时跟着重定位（repositionEndNode）。
+  const outDeg = {};
+  for (const e of def.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
+  const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0));
+  if (exits.length) {
+    const endPos = endNodePos(pos, exits);
+    pos.__end__ = endPos;
+    for (const n of exits) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('class', 'edge-end');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-dasharray', '5 5');
+      path.setAttribute('marker-end', `url(#ah-${mode})`);
+      svg.appendChild(path);
+      canvas.edges.push({ from: n.id, to: '__end__', path });   // 不带 chip/del：终点连线不可点
+      updateEdge(canvas, canvas.edges[canvas.edges.length - 1]);
+    }
+    const endDiv = document.createElement('div');
+    endDiv.className = 'node end-node';
+    endDiv.dataset.node = '__end__';
+    endDiv.style.left = endPos.x + 'px'; endDiv.style.top = endPos.y + 'px'; endDiv.style.width = endPos.w + 'px';
+    endDiv.innerHTML = `<div class="row1"><span class="badge end-badge">END</span><span class="name">结束</span></div>
+      <div class="sub">自动生成</div>`;
+    endDiv.onclick = () => toast('「结束」由画布按流程出口自动生成 —— 最后一个没有下游的节点就是终点，不需要手动连线');
+    el.appendChild(endDiv);
+  }
   fitCanvas(el, pos);
   el.__canvas = canvas;
   return canvas;
 }
 
 /* ── 边的几何与重算（拖动时只更新受影响的边，不整图重绘） ── */
+// 「结束」终点位置：放在最右出口的右边，y 取各出口的垂直中点
+function endNodePos(pos, exits) {
+  const exX = Math.max(...exits.map(n => pos[n.id].x + pos[n.id].w));
+  const ys = exits.map(n => pos[n.id].y);
+  return { x: exX + 100, y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2), w: 136, h: 66 };
+}
+// 出口节点被拖动后，终点与汇聚虚线要跟着走（不重绘整图）
+function repositionEndNode(canvas) {
+  const { el, def, pos } = canvas;
+  const outDeg = {};
+  for (const e of def.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
+  const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0));
+  const endEl = el.querySelector('.end-node');
+  if (!exits.length) {                          // 出口没了（节点被删光）→ 终点一并收起
+    if (endEl) endEl.remove();
+    delete pos.__end__;
+    return;
+  }
+  pos.__end__ = endNodePos(pos, exits);
+  if (endEl) { endEl.style.left = pos.__end__.x + 'px'; endEl.style.top = pos.__end__.y + 'px'; }
+  updateEdgesFor(canvas, '__end__');
+}
 function edgeGeometry(a, b) {
   const x1 = a.x + a.w, y1 = a.y + 26, x2 = b.x - 6, y2 = b.y + 26;
   const d = Math.abs(y1 - y2) > 40
@@ -807,8 +857,10 @@ function updateEdge(canvas, rec) {
     rec.label.setAttribute('x', (g.x1 + g.x2) / 2);
     rec.label.setAttribute('y', (g.y1 + g.y2) / 2 - 6);
   }
-  rec.chip.style.left = ((g.x1 + g.x2) / 2 - 60) + 'px';
-  rec.chip.style.top = ((g.y1 + g.y2) / 2 - 12) + 'px';
+  if (rec.chip) {
+    rec.chip.style.left = ((g.x1 + g.x2) / 2 - 60) + 'px';
+    rec.chip.style.top = ((g.y1 + g.y2) / 2 - 12) + 'px';
+  }
   if (rec.del) { rec.del.style.left = ((g.x1 + g.x2) / 2 - 8) + 'px'; rec.del.style.top = ((g.y1 + g.y2) / 2 + 12) + 'px'; }
 }
 function updateEdgesFor(canvas, id) {
@@ -863,6 +915,7 @@ function setNodePos(canvas, id, x, y) {
   const div = canvas.el.querySelector(`[data-node="${id}"]`);
   if (div) { div.style.left = p.x + 'px'; div.style.top = p.y + 'px'; }
   updateEdgesFor(canvas, id);
+  if (id !== '__end__') repositionEndNode(canvas);   // 拖出口节点时终点跟随
   fitCanvas(canvas.el, canvas.pos);
 }
 function commitLayout(canvas, id) {

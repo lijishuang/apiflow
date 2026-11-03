@@ -688,3 +688,9 @@ tbody tr:hover{background:var(--bg2)}
 .news-intro{margin:0 0 14px;padding:10px 14px;border:1px dashed var(--line);border-radius:var(--radius-s);font-size:13px;line-height:1.7;color:var(--muted);background:var(--bg1)}
 .news-intro a{color:var(--blue);text-decoration:none}
 .news-intro a:hover{text-decoration:underline}
+
+/* ───────── 画布「结束」终点（虚拟节点，自动生成不进 DSL） ───────── */
+.node.end-node{background:var(--bg1);border:1px dashed var(--line);border-left-width:1px;cursor:default;opacity:.92}
+.node.end-node:hover{border-color:var(--line);transform:none}
+.end-badge{background:var(--bg3);color:var(--muted);letter-spacing:.08em}
+.edge-end{stroke:var(--edge-soft);fill:none;opacity:.5}

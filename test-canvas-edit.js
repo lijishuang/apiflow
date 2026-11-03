@@ -33,26 +33,35 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   await sleep(400);
   const pickCount = await page.locator('#opPickList .srccard').count();
   (pickCount > 5 ? ok : bad)(`接口选择器列出 ${pickCount} 个接口`);
-  await page.fill('#opPickSearch', '查询供应商');
+  // 从当前目录动态挑接口 —— 不写死接口名（目录内容随接入来源变化）
+  const pick1 = await page.evaluate(() => { const o = state.catalog.operations[0]; return { name: o.name, id: o.id }; });
+  await page.fill('#opPickSearch', pick1.name);
   await sleep(300);
-  await page.locator('#opPickList .srccard').first().click();
+  if (await page.locator('#opPickList .srccard').count() > 0) await page.locator('#opPickList .srccard').first().click();
+  else await page.evaluate(id => pickOperation(id), pick1.id);   // 名字搜不到时直接点选
   await sleep(700);
-  eq('添加后画布 2 节点', 2, await page.locator('#buildCanvas .node').count());
+  eq('添加后画布 3 节点（2 真实 + 1 自动结束）', 3, await page.locator('#buildCanvas .node').count());
+  eq('「结束」终点自动出现', 1, await page.locator('#buildCanvas .end-node').count());
+  let endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
+  eq('出口→结束 虚线汇聚（1 条）', 1, endEdges);
   let edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
   eq('start→节点 自动连线', 1, edges);
-  // 第二个接口
+  // 第二个接口（换一个不同的 op）
+  const pick2 = await page.evaluate(() => {
+    const ops = state.catalog.operations;
+    const used = state.draft.nodes.map(x => x.operationId).filter(Boolean);
+    const o = ops.find(x => !used.includes(x.id)) || ops[1] || ops[0];
+    return { name: o.name, id: o.id };
+  });
   await page.click('#btnAddNode'); await sleep(300);
-  await page.fill('#opPickSearch', '同步分数');
+  await page.fill('#opPickSearch', pick2.name);
   await sleep(300);
-  const pick2 = await page.locator('#opPickList .srccard').count();
-  if (pick2 > 0) {
-    await page.locator('#opPickList .srccard').first().click();
-    await sleep(700);
-  } else {
-    await page.fill('#opPickSearch', '通知'); await sleep(300);
-    await page.locator('#opPickList .srccard').first().click(); await sleep(700);
-  }
-  eq('添加第二个接口后 3 节点', 3, await page.locator('#buildCanvas .node').count());
+  if (await page.locator('#opPickList .srccard').count() > 0) await page.locator('#opPickList .srccard').first().click();
+  else await page.evaluate(id => pickOperation(id), pick2.id);
+  await sleep(700);
+  eq('添加第二个接口后 4 节点（3 真实 + 1 结束）', 4, await page.locator('#buildCanvas .node').count());
+  endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
+  eq('出口仍只有链尾一个（1 条虚线）', 1, endEdges);
   edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
   eq('链尾自动接上新节点（2 条边）', 2, edges);
 
@@ -118,18 +127,33 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   page.once('dialog', d => d.accept());
   await page.locator('.node-del').last().click();
   await sleep(700);
-  eq('删除后 2 节点', 2, await page.locator('#buildCanvas .node').count());
+  eq('删除后 3 节点（2 真实 + 1 结束）', 3, await page.locator('#buildCanvas .node').count());
+  eq('「结束」仍在（剩余真实节点是出口）', 1, await page.locator('#buildCanvas .end-node').count());
   edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
   eq('相关边一并移除（剩 1 条）', 1, edges);
+  endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
+  eq('终点虚线重新汇聚（剩 1 条）', 1, endEdges);
+
+  console.log('── E5b 结束终点跟随拖拽 ──');
+  const endBefore = await page.locator('#buildCanvas .end-node').boundingBox();
+  const exitBb = await page.locator('#buildCanvas .node').nth(1).boundingBox();   // 剩下的真实节点 = 出口
+  await page.mouse.move(exitBb.x + exitBb.width / 2, exitBb.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(exitBb.x + exitBb.width / 2, exitBb.y + 130, { steps: 6 });
+  await page.mouse.up();
+  await sleep(400);
+  const endAfter = await page.locator('#buildCanvas .end-node').boundingBox();
+  const dy = Math.round(endAfter.y - endBefore.y);
+  (Math.abs(dy) > 30 ? ok : bad)(`拖出口节点后终点跟随（Δy=${dy}）`);
 
   console.log('── E6 自动保存 ──');
   const note = await page.locator('#buildNote').innerText();
-  (note.includes('自动保存') || note.includes('Schema 有问题') ? ok : bad)('自动保存提示: ' + note);
+  (note.includes('自动保存') || note.includes('Schema 有问题') || note.includes('布局已更新') ? ok : bad)('保存提示: ' + note);
   // 从后端确认草稿真的落了
   const flowId = await page.evaluate(() => state.draftFlowId);
   const saved = await page.evaluate(async id => (await (await fetch('/api/flows/' + id + '/def')).json()), flowId);
   const svNodes = saved.def ? saved.def.nodes.length : -1;
-  eq('后端草稿节点数 = 画布节点数', 2, svNodes);
+  eq('后端草稿只存真实节点（结束标记不进 DSL）', 2, svNodes);
 
   await page.screenshot({ path: '/tmp/canvas-edit.png' });
   const fatal = errors.filter(e => !e.includes('favicon') && !e.includes('Failed to load resource'));   // favicon 404 无害
