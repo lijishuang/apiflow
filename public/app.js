@@ -1546,19 +1546,15 @@ function pickOperation(opId) {
     const ay = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).y : 260;
     d.layout[nid] = { x: ax + (anchor ? nodeWidth(anchor) + 90 : 440), y: ay };
   }
-  // 自动把新节点接到锚点（选中的节点 / 链尾 / start）；条件分支标记由 addEdge 处理
-  if (anchor) {
-    if (!addEdge(anchor.id, nid, true) && anchor.type === 'condition')
-      toast(`「${anchor.name}」两个分支已占用 —— 新节点未连线，可用「连线」手动接`, 'bad');
-  }
+  // 不自动连线：新节点只就位，连不连、连到哪由用户用「连线」手动画（误连比不连更难发现）
   renderBuildCanvas();
   saveCanvasDraft();
   if (op.params && op.params.length) {
     const miss = op.params.filter(p => !d.nodes.find(x => x.id === nid).config.url.includes('{' + p + '}'));
     if (miss.length) toast(`接口「${op.name}」需要参数：${miss.join(', ')} —— 点开节点在 URL 里填值或写 {{input.x}}`, 'bad');
-    else toast(`已添加「${op.name}」，URL 里的 {${op.params.join('}/{')}} 占位符要替换成实际值`);
+    else toast(`已添加「${op.name}」（未连线）—— 点工具栏「⇄ 连线」手动接入流程；URL 里的 {${op.params.join('}/{')}} 占位符要替换成实际值`);
   } else {
-    toast(`已添加「${op.name}」${anchor ? '，并接到「' + anchor.name + '」' : ''}—— 位置可拖动调整`);
+    toast(`已添加「${op.name}」（未连线）—— 点工具栏「⇄ 连线」手动接入流程；位置可拖动调整`);
   }
   onNodeClick(node, 'edit');   // 直接打开属性面板，引导补参数
   const el = $('#buildCanvas').querySelector(`[data-node="${nid}"]`);

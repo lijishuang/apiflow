@@ -1,5 +1,5 @@
-/* 画布手动编辑验证：新建空白 → 添加接口 ×2（自动连线）→ 手动连线 → 删边 → 删节点 → 属性面板 body 编辑 */
-/* 画布手动编辑 UI 回归：新建空白 → 添加接口（自动连线）→ 连线/删线 → 删节点 → body 编辑 → 自动保存
+/* 画布手动编辑验证：新建空白 → 添加接口 ×2（不自动连线）→ 手动连线 → 删节点 → 属性面板 body 编辑 */
+/* 画布手动编辑 UI 回归：新建空白 → 添加接口（不自动连线）→ 手动连线 → 删节点 → body 编辑 → 自动保存
    运行：NODE_PATH=<playwright-core 所在> node test-canvas-edit.js （需本机 Chrome）*/
 const { chromium } = require('playwright-core');
 const BASE = 'http://127.0.0.1:3300';
@@ -45,7 +45,7 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   let endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
   eq('出口→结束 虚线汇聚（1 条）', 1, endEdges);
   let edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
-  eq('start→节点 自动连线', 1, edges);
+  eq('新接口不自动连线（0 条实线）', 0, edges);
   // 第二个接口（换一个不同的 op）
   const pick2 = await page.evaluate(() => {
     const ops = state.catalog.operations;
@@ -61,31 +61,32 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   await sleep(700);
   eq('添加第二个接口后 4 节点（3 真实 + 1 结束）', 4, await page.locator('#buildCanvas .node').count());
   endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
-  eq('出口仍只有链尾一个（1 条虚线）', 1, endEdges);
+  eq('两个出口各一条虚线（2 条）', 2, endEdges);
   edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
-  eq('链尾自动接上新节点（2 条边）', 2, edges);
+  eq('第二个接口也不自动连线（仍 0 条实线）', 0, edges);
 
   console.log('── E3 手动连线模式 ──');
-  // 先删掉最后一条边，再手动连回来，验证连线交互
+  // 新接口不再自动连线 —— 边上的删除/重接按钮要等有边才出现
   const dels = await page.locator('.edge-del').count();
-  (dels >= 2 ? ok : bad)(`每条边有删除按钮（${dels} 个）`);
-  await page.locator('.edge-del').last().click();
-  await sleep(500);
-  edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
-  eq('删边后剩 1 条', 1, edges);
-  // 连线：点节点1 → 点节点2
+  (dels === 0 ? ok : bad)(`未连线时没有边删除按钮（${dels} 个）`);
+  // 手动画两条边恢复 start→n1→n2 拓扑
   await page.click('#btnLinkMode');
   await sleep(200);
   const hint1 = await page.locator('#canvasHint').innerText();
   (hint1.includes('起点') ? ok : bad)('提示选起点: ' + hint1);
-  await page.locator('#buildCanvas .node').nth(1).click();
+  await page.locator('#buildCanvas .node').nth(0).click();
   await sleep(300);
   const hint2 = await page.locator('#canvasHint').innerText();
   (hint2.includes('目标') ? ok : bad)('提示选目标: ' + hint2);
+  await page.locator('#buildCanvas .node').nth(1).click();
+  await sleep(500);
+  await page.click('#btnLinkMode'); await sleep(200);
+  await page.locator('#buildCanvas .node').nth(1).click();
+  await sleep(300);
   await page.locator('#buildCanvas .node').nth(2).click();
   await sleep(500);
   edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
-  eq('手动连线成功（回到 2 条边）', 2, edges);
+  eq('手动连两条边成功（start→n1→n2）', 2, edges);
 
   console.log('── E4 节点属性面板（body 编辑）──');
   await page.locator('#buildCanvas .node').nth(2).click();
