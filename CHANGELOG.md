@@ -2,6 +2,12 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- **首页「清空记录」点击没反应**：`clearRunRecords` / `deleteRunRecord` 被首页与运行观测页各定义一次，JS 后声明覆盖前声明，首页按钮绑到了运行观测页的版本（其前置条件在首页永远不成立，静默返回）。观测页版本重命名为 `clearRunListRecords` / `deleteRunListRecord`，两页各归各；首页删单条随之恢复正确刷新。
+
 ## [0.2.0] - 2026-11-03
 
 ### 新增
