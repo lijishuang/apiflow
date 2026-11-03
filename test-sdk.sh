@@ -192,24 +192,25 @@ EOF
 curl -s -X POST "$B/api/sources/$SID/refresh" > /dev/null
 
 echo "══ T9 自动同步调度：到点自动重新解析并记录状态（约 17s）══"
+# 独立来源：T7 来源经 T8 手动 refresh 后 lastAt 已回写（60s 内不再 due，调度语义），
+# 自动同步的首跑必须用一块「从未手动刷新过」的干净来源验证
 $P -c "
 import json,urllib.request
-sid=open('/tmp/sdk-t7').read().strip()
-def post(u,d=None):
-    r=urllib.request.Request('$B'+u,data=json.dumps(d or {}).encode(),headers={'content-type':'application/json'})
-    return json.load(urllib.request.urlopen(r))
-r=post('/api/sources/'+sid+'/autosync',{'enabled':True,'intervalMs':60000})
-assert r['autoSync']['enabled'] is True, r
-open('/tmp/sdk-sync-at','w').write(str(r['autoSync']['lastAt'] or 0))
-" ; chk "开启自动同步" $?
+r=json.load(urllib.request.urlopen(urllib.request.Request('$B/api/sources',
+  data=json.dumps({'mode':'sdk','name':'SDK测试AUTO','url':'$B/upstream/_specs/sdk/tmp-live.ts',
+                   'autoSync':{'enabled':True,'intervalMs':60000}}).encode(),
+  headers={'content-type':'application/json'})))
+assert r['added']==2, r['added']
+open('/tmp/sdk-t9','w').write(r['source']['id'])
+open('/tmp/sdk-sync-at','w').write('0')
+" ; chk "独立来源开启自动同步" $?
 sleep 17
 $P -c "
 import json,urllib.request,time
-sid=open('/tmp/sdk-t7').read().strip()
-before=float(open('/tmp/sdk-sync-at').read().strip() or 0)
+sid=open('/tmp/sdk-t9').read().strip()
 s=[x for x in json.load(urllib.request.urlopen('$B/api/sources'))['items'] if x['id']==sid][0]
 a=s['autoSync']
-assert a['lastAt'] and a['lastAt']>before, a
+assert a['lastAt'] and a['lastAt']>0, a
 assert a['lastStatus']=='ok', a
 assert a['lastDiff'] is not None, a
 " ; chk "调度器自动执行并回写 lastAt / lastStatus / lastDiff" $?

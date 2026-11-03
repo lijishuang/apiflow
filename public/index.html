@@ -182,9 +182,11 @@
   <div class="builder-main">
     <div class="canvas-wrap" style="position:relative">
       <div class="canvas-tools" id="canvasTools">
+        <select id="buildFlowSel" class="sel" title="当前编辑的流程 —— 可切换到其它流程的草稿继续编辑" style="max-width:230px"><option value="">未选择流程</option></select>
+        <button class="btn" id="btnNewChat" title="清空画布与对话，下一条描述将生成一条全新流程（原流程保留）">✨ 新建</button>
+        <button class="btn" id="btnNewBlank" title="从空白流程开始手动搭建（自动带开始节点）">Blank 新建空白</button>
         <button class="btn" id="btnAddNode" title="从接口目录挑一个接口，添加为流程节点">＋ 添加接口</button>
         <button class="btn" id="btnLinkMode" title="进入连线模式：先点起点节点，再点目标节点">⇄ 连线</button>
-        <button class="btn" id="btnNewBlank" title="从空白流程开始手动搭建（自动带开始节点）">Blank 新建空白</button>
         <span class="note" id="canvasHint"></span>
       </div>
       <div class="canvas" id="buildCanvas"></div>

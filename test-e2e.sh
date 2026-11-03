@@ -312,8 +312,38 @@ assert g['ok'] is False and any('end.assert.expr' in e for e in g['errors']), g
 PYEOF
 chk "Schema 闸拦截非法 end.assert 结构" $?
 
+echo "══ T16 搭建器「新建」语义（带 flowId + 新建关键词 → 生成新流程，旧草稿不动）══"
+$P - <<PYEOF
+import json,urllib.request
+op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+def api(p,m='POST',b=None):
+    r=urllib.request.Request('$B'+p,method=m,data=json.dumps(b).encode() if b is not None else None,headers={'content-type':'application/json'})
+    with op.open(r,timeout=60) as x: return json.loads(x.read())
+def dele(fid):
+    rq=urllib.request.Request('$B/api/flows/'+fid,method='DELETE')
+    op.open(rq,timeout=30).read()
+base=json.load(open('/tmp/e2e-end.json'))['def']
+base['id']='flow_e2e_new'; base['name']='新建语义基准'
+api('/api/flows/flow_e2e_new/draft',b={'def':base})   # 建基准草稿
+# 普通描述 → 延续当前 flow（多轮调整语义）
+a=api('/api/agent/draft',b={'text':'查询库存 SKU-01','flowId':'flow_e2e_new'})
+assert a['flow']['id']=='flow_e2e_new', a['flow']
+# 「新建」语义 → 生成新流程，不动旧的
+b=api('/api/agent/draft',b={'text':'新建一条：查询库存 SKU-02','flowId':'flow_e2e_new'})
+assert b['flow']['id']!='flow_e2e_new', b['flow']
+rq=urllib.request.Request('$B/api/flows/flow_e2e_new/def')
+old=json.loads(op.open(rq,timeout=30).read())
+# 普通描述会重建同 flow（多轮调整语义，名字变为「查询库存」属预期）；
+# 关键断言：旧流程没被「新建」的那条覆盖（名字不等于新流程名，节点是库存接口）
+assert old['def']['name']!='新建一条', old['def'].get('name')
+assert any(n.get('operationId')=='query_stock' for n in old['def']['nodes']), old['def']['nodes']
+dele(b['flow']['id'])
+print('   普通描述延续旧流程；「新建」生成', b['flow']['id'], '（基准流程未被覆盖）')
+PYEOF
+chk "「新建」语义生成新流程且不动旧草稿" $?
+
 # ══ 清理自建数据（种子流程 / NL 草稿流程 / 种子接口来源）══
-for FID in $SEED flow_e2e_loop flow_e2e_query $END_DEF $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
+for FID in $SEED flow_e2e_loop flow_e2e_query $END_DEF flow_e2e_new $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
   [ -n "$FID" ] && curl -s -X DELETE $B/api/flows/$FID > /dev/null
 done
 [ -n "$SRC_ID" ] && curl -s -X DELETE $B/api/sources/$SRC_ID > /dev/null && echo "  （种子接口来源已清理）"

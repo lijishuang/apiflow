@@ -196,6 +196,34 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   const svNodes = saved.def ? saved.def.nodes.length : -1;
   eq('后端草稿只存真实节点（结束标记不进 DSL）', 2, svNodes);
 
+  console.log('── E7 当前流程下拉 / 新建入口 ──');
+  eq('工具栏有流程下拉', true, await page.locator('#buildFlowSel').isVisible());
+  eq('工具栏有「✨ 新建」', 1, await page.locator('#btnNewChat').count());
+  eq('下拉选中当前流程', flowId, await page.locator('#buildFlowSel').inputValue());
+  const optCount = await page.locator('#buildFlowSel option').count();
+  (optCount > 2 ? ok : bad)(`下拉列出 ${optCount} 个选项（含未选择）`);
+  // ✨ 新建 → 清空画布与对话，下拉回到「未选择」
+  await page.click('#btnNewChat');
+  await sleep(500);
+  eq('新建后草稿清空', null, await page.evaluate(() => state.draft));
+  eq('新建后下拉回到未选择', '__new__', await page.locator('#buildFlowSel').inputValue());
+  // Blank 再建 → 下拉跟随
+  await page.click('#btnNewBlank');
+  await sleep(700);
+  eq('Blank 后下拉跟随新流程', await page.evaluate(() => state.draftFlowId), await page.locator('#buildFlowSel').inputValue());
+  // 下拉切换到另一条已有流程 → 画布载入它的草稿
+  const otherId = await page.evaluate(id => { const f = (state.flows || []).find(x => x.id !== id); return f ? f.id : null; }, await page.evaluate(() => state.draftFlowId));
+  if (otherId) {
+    await page.selectOption('#buildFlowSel', otherId);
+    await sleep(900);
+    eq('切换后 draftFlowId 更新', otherId, await page.evaluate(() => state.draftFlowId));
+    (await page.locator('#buildCanvas .node').count() > 0 ? ok : bad)('切换后画布载入该流程草稿');
+    // 切回测试流程继续后续断言
+    await page.selectOption('#buildFlowSel', flowId);
+    await sleep(700);
+    eq('切回测试流程', flowId, await page.evaluate(() => state.draftFlowId));
+  } else bad('平台没有其它流程可用于切换测试');
+
   await page.screenshot({ path: '/tmp/canvas-edit.png' });
   const fatal = errors.filter(e => !e.includes('favicon') && !e.includes('Failed to load resource'));   // favicon 404 无害
   if (fatal.length) { bad('页面报错: ' + fatal[0]); } else ok('无页面错误');

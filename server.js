@@ -1120,7 +1120,12 @@ const server = http.createServer(async (req, res) => {
     if ((m = p.match(/^\/api\/flows\/([\w-]+)\/def$/)) && req.method === 'GET') {
       const f = store.getFlow(m[1]);
       if (!f) return json(res, 404, { error: 'flow not found' });
-      return json(res, 200, { def: (f.published && f.published.def) || (f.draft && f.draft.def) || null, version: f.published ? f.published.version : 0 });
+      // ?src=draft 优先取草稿（搭建器「切换流程」用：续编上次画布里的内容而非已发布版本）
+      const preferDraft = url.searchParams.get('src') === 'draft';
+      const def = preferDraft
+        ? ((f.draft && f.draft.def) || (f.published && f.published.def) || null)
+        : ((f.published && f.published.def) || (f.draft && f.draft.def) || null);
+      return json(res, 200, { def, version: f.published ? f.published.version : 0 });
     }
     // ── 并行批跑：一次提交多个流程，按并发度同时执行 ──
     if (p === '/api/flows/batch-run' && req.method === 'POST') {
@@ -1208,7 +1213,9 @@ const server = http.createServer(async (req, res) => {
         error: out.error, references: refs, docRefs: out.docRefs || docRefs,
         suggestions: (reviseMiss && reviseMiss.suggestions) || out.suggestions || [],
       });
-      const flowId = body.flowId || out.draft.id;
+      // 明确说了「新建/重新做/另一条…」→ 一律生成新流程，绝不动旧草稿；
+      // 否则才延续当前 flowId（多轮调整语义）
+      const flowId = (body.flowId && !wantsNew) ? body.flowId : out.draft.id;
       out.draft.id = flowId;
       out.draft.source = 'nl';
       const f = store.saveDraft(flowId, out.draft.name, out.draft, [

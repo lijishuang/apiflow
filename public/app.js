@@ -82,7 +82,7 @@ _tabs.forEach(t => t.addEventListener('click', () => {
   if (t.dataset.s === 'api') loadApi();
   if (t.dataset.s === 'run') refreshRunFlows();
   if (t.dataset.s === 'news') loadNews();
-  if (t.dataset.s === 'build') { ensureCreds().then(syncDraftAuth); }   // 搭建器：认证下拉需要凭证列表
+  if (t.dataset.s === 'build') { ensureCreds().then(syncDraftAuth); refreshBuildFlowSel(); }   // 搭建器：认证下拉 + 当前流程下拉
 }));
 window.addEventListener('resize', moveSlider);
 window.addEventListener('load', moveSlider);
@@ -680,7 +680,16 @@ function openRun(flowId) {                  // 跳到运行观测并选中该流
   switchTab('run');
   refreshRunFlows();
 }
-$('#btnNew').onclick = () => { state.draft = null; state.draftFlowId = null; switchTab('build'); $('#chatMsgs').innerHTML = '<div class="msg agent">描述你想自动化的接口流程，例如：<br>「供应商准入检查：查供应商 S-8891 状态，如果是 ACTIVE 就把分数同步给 ERP，否则标记拒绝」</div>'; };
+/* 新建：清空画布与对话 —— 下一条描述将生成一条全新流程（原流程原样保留） */
+function startNewChatDraft() {
+  state.draft = null; state.draftFlowId = null;
+  switchTab('build');
+  $('#chatMsgs').innerHTML = '<div class="msg agent">描述你想自动化的接口流程，例如：<br>「供应商准入检查：查供应商 S-8891 状态，如果是 ACTIVE 就把分数同步给 ERP，否则标记拒绝」</div>';
+  $('#nodeForm').innerHTML = '<span class="note">点击画布节点进行编辑</span>';
+  $('#dbgInput').value = '';
+  renderBuildCanvas(); renderGates(); refreshBuildFlowSel();
+}
+$('#btnNew').onclick = startNewChatDraft;
 async function editFlow(id) {
   // 以已发布定义作为草稿底稿载入画布
   const pub = await api(`/api/flows/${id}/def`);
@@ -1180,10 +1189,43 @@ $('#btnNewBlank').onclick = async () => {
   state.draftFlowId = state.draft.id;
   try { await api(`/api/flows/${state.draftFlowId}/draft`, { method: 'POST', body: JSON.stringify({ def: state.draft }) }); } catch {}
   switchTab('build');
-  renderBuildCanvas(); renderGates();
+  renderBuildCanvas(); renderGates(); refreshBuildFlowSel();
   $('#nodeForm').innerHTML = '<span class="note">点击画布节点进行编辑</span>';
   addChat('agent', '已创建空白流程。点「＋ 添加接口」加第一步，节点之间用「⇄ 连线」或直接拖不动时点节点右侧按钮连接。');
 };
+
+/* ── 搭建器「当前流程」：下拉切换 / 新建入口 ──
+   画布一直显示最近一次生成/编辑的草稿（会话内保留），这里给出两个明确出口：
+   ✨ 新建 = 清空重来（原流程保留，下一条描述生成新流程）；下拉 = 指定编辑哪条已有流程的草稿 */
+async function refreshBuildFlowSel() {
+  const sel = $('#buildFlowSel');
+  if (!sel) return;
+  let flows = [];
+  try { flows = await api('/api/flows'); } catch { /* 列表挂了就保留现有选项 */ }
+  const cur = state.draftFlowId || '';
+  sel.innerHTML = flows.length
+    ? flows.map(f => `<option value="${esc(f.id)}" ${f.id === cur ? 'selected' : ''}>${esc(f.name || f.id)}${f.version > 0 ? ' · v' + f.version : ' · 草稿'}</option>`).join('')
+      + `<option value="__new__" ${cur ? '' : 'selected'}>＋ 未选择（新建）</option>`
+    : '<option value="__new__" selected>＋ 未选择（新建）</option>';
+}
+$('#buildFlowSel').onchange = async e => {
+  const id = e.target.value;
+  if (!id || id === '__new__') { startNewChatDraft(); return; }
+  if (id === state.draftFlowId) return;
+  try {
+    const r = await api(`/api/flows/${id}/def?src=draft`);
+    if (!r.def) { toast('该流程还没有内容'); e.target.value = state.draftFlowId || '__new__'; return; }
+    state.draftFlowId = id;
+    state.draft = r.def;
+    state.draft.gates = (state.draft.gates) || { schema: { ok: null, errors: [], warnings: [] }, dryRun: { ok: null }, confirm: { ok: null } };
+    renderBuildCanvas(); renderGates(); syncDbgInput(); refreshBuildFlowSel();
+    $('#nodeForm').innerHTML = '<span class="note">点击画布节点进行编辑</span>';
+    $('#dbgLog').innerHTML = '<div class="t">—— 调试日志（实时事件流）——</div>';
+    $('#dbgResult').innerHTML = ''; $('#dbgStatus').textContent = '';
+    addChat('agent', '已切换到流程「' + esc(state.draft.name || id) + '」的草稿 —— 画布显示的是它最近一次编辑的内容，可继续调整或发布。');
+  } catch (err) { toast('切换失败：' + err.message); e.target.value = state.draftFlowId || '__new__'; }
+};
+$('#btnNewChat').onclick = startNewChatDraft;
 function nodeName(id) {
   const n = state.draft && state.draft.nodes.find(x => x.id === id);
   return n ? n.name : id;
@@ -1409,6 +1451,7 @@ async function sendBuildText() {
     addDocRefs(res.docRefs);
     $('#dbgInput').value = '';
     syncDbgInput();
+    refreshBuildFlowSel();
     renderBuildCanvas(); renderGates();
   } catch (e) {
     addChat('agent', '⚠ ' + e.message);
