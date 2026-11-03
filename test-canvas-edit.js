@@ -134,6 +134,11 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   await page.screenshot({ path: '/tmp/canvas-edit.png' });
   const fatal = errors.filter(e => !e.includes('favicon') && !e.includes('Failed to load resource'));   // favicon 404 无害
   if (fatal.length) { bad('页面报错: ' + fatal[0]); } else ok('无页面错误');
+  // 收尾：删掉测试建的流程，不在用户数据里留垃圾
+  try {
+    await page.evaluate(async id => (await fetch('/api/flows/' + id, { method: 'DELETE' })).json(), flowId);
+    ok('测试流程已清理');
+  } catch { bad('测试流程清理失败'); }
   console.log(`\n画布手动编辑：通过 ${pass} / 失败 ${fail}`);
   await browser.close();
   process.exit(fail ? 1 : 0);

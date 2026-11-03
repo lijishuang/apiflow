@@ -1342,7 +1342,7 @@ function onNodeClick(n, mode) {  state.selNode = n;
       <b>名称</b><input id="f-name" value="${esc(n.name)}">
       <b>方法</b><select id="f-method">${['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].map(m => `<option ${m === n.config.method.toUpperCase() ? 'selected' : ''}>${m}</option>`).join('')}</select>
       <b>URL</b><input id="f-url" value="${esc(n.config.url)}">
-      <b>Query</b><div class="qrows" id="f-query">${renderQueryRows(n.config.query)}</div>
+      <b>Query</b><div class="qblock"><div class="qrows" id="f-query">${renderQueryRows(n.config.query)}</div><div class="qhints" id="f-query-hint"></div></div>
       <b>Body</b><textarea id="f-body" rows="4" placeholder='{"id": "{{input.orderId}}"}'>${esc(n.config.body != null ? JSON.stringify(n.config.body, null, 1) : '')}</textarea>
       <span class="kv-sec">执行策略</span>
       <b>重试次数</b><input id="f-retry" type="number" min="1" max="10" value="${n.retry ? n.retry.maxAttempts : 1}">
@@ -1421,6 +1421,65 @@ function onNodeClick(n, mode) {  state.selNode = n;
       saveCanvasDraft();
     }
   };
+  // 接口声明过 / 运行期学到过的 query 参数：直接给候选，不用用户凭空回忆字段名
+  if (n.type === 'http' && n.operationId) loadQueryHints(n);
+}
+
+/* ── Query 参数候选：SDK 字段 + 网关报错学到的必填项 ── */
+const qhCache = new Map();     // operationId -> 参数提示（同一会话内复用）
+async function loadQueryHints(n) {
+  const box = $('#f-query-hint');
+  if (!box) return;
+  let d = qhCache.get(n.operationId);
+  if (!d) {
+    try {
+      d = await api('/api/ops/' + encodeURIComponent(n.operationId) + '/params');
+      qhCache.set(n.operationId, d);
+    } catch { if ($('#f-query-hint')) $('#f-query-hint').innerHTML = ''; return; }
+  }
+  if (state.selNode !== n || !$('#f-query-hint')) return;   // 面板已经切到别的节点
+  renderQueryHints(n, d);
+}
+function renderQueryHints(n, d) {
+  const box = $('#f-query-hint');
+  if (!box) return;
+  const fields = d.query || [];
+  if (!fields.length) { box.innerHTML = ''; return; }
+  const cur = n.config.query || {};
+  const filled = k => cur[k] != null && String(cur[k]) !== '';
+  const chips = fields.map(f => {
+    const has = filled(f.name);
+    const label = f.label && f.label !== f.name ? f.label : '';
+    const shown = has ? cur[f.name] : (f.sample || '');
+    const cls = ['qchip', f.required ? 'req' : '', has ? 'on' : (f.required ? 'miss' : '')].filter(Boolean).join(' ');
+    const src = /^(?:sdk|spec)$/.test(f.source) ? '' : (d.learned ? ' · 网关反馈学到' : '');
+    return `<button type="button" class="${cls}" data-name="${esc(f.name)}" data-val="${esc(shown == null ? '' : String(shown))}"
+      title="${esc(`${f.sdkName || f.name}${label ? ' · ' + label : ''}${f.required ? ' · 必填' : ''}${src}`)}">${esc(f.name)}${label ? `<i>${esc(label)}</i>` : ''}${f.required ? '<em>必填</em>' : ''}${shown ? `<code>${esc(String(shown).slice(0, 18))}</code>` : ''}</button>`;
+  }).join('');
+  const miss = fields.filter(f => f.required && !filled(f.name)).map(f => f.name);
+  box.innerHTML = `<div class="qhint-head">可加参数${miss.length ? `<span class="qmiss">还缺 ${esc(miss.join('、'))}</span>` : ''}</div><div class="qchips">${chips}</div>`;
+  box.querySelectorAll('.qchip').forEach(b => {
+    b.onclick = () => { addQueryRow(b.dataset.name, b.dataset.val); renderQueryHints(n, d); };
+  });
+}
+// 追加一行 Query；已有同名行就改值；面板里那行空行直接复用
+function addQueryRow(k, v = '') {
+  const wrap = $('#f-query');
+  if (!wrap) return;
+  const rows = [...wrap.querySelectorAll('.qrow')];
+  const same = rows.find(r => r.querySelector('.qk').value.trim() === k);
+  const blank = rows.find(r => !r.querySelector('.qk').value.trim());
+  const row = same || blank || (() => {
+    const t = document.createElement('div');
+    t.innerHTML = queryRowHtml();
+    const el = t.firstElementChild;
+    wrap.insertBefore(el, wrap.querySelector('#f-query-add'));
+    return el;
+  })();
+  row.querySelector('.qk').value = k;
+  const qv = row.querySelector('.qv');
+  qv.value = v == null ? '' : String(v);
+  qv.dispatchEvent(new Event('input', { bubbles: true }));   // 走面板统一收集 + 落草稿
 }
 $('#btnValidate').onclick = async () => {
   if (!state.draft) return alert('请先生成或载入草稿');

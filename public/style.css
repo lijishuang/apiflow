@@ -612,3 +612,17 @@ tbody tr:hover{background:var(--bg2)}
 .kv .qdel:hover{color:var(--bad);background:var(--bad-bg);border-color:var(--red-line)}
 .kv .qadd{align-self:flex-start;margin-top:2px;border:1px dashed var(--line);background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px;padding:3px 10px;border-radius:7px;transition:border-color .12s,color .12s}
 .kv .qadd:hover{color:var(--teal);border-color:var(--teal-line);background:var(--teal-bg)}
+
+/* ── 节点属性：Query 参数候选（SDK 字段 / 网关反馈学到的必填项）── */
+.kv .qblock{display:flex;flex-direction:column;gap:6px;min-width:0}
+.kv .qhints{display:flex;flex-direction:column;gap:5px;min-width:0}
+.kv .qhint-head{font-size:11.5px;color:var(--faint);display:flex;align-items:center;gap:8px}
+.kv .qhint-head .qmiss{color:var(--bad);background:var(--bad-bg);border:1px solid var(--red-line);border-radius:5px;padding:1px 6px}
+.kv .qchips{display:flex;flex-wrap:wrap;gap:5px}
+.kv .qchip{display:inline-flex;align-items:center;gap:5px;max-width:100%;border:1px solid var(--line);background:var(--bg1);color:var(--muted);cursor:pointer;font:12px/1.4 var(--font-mono);padding:3px 8px;border-radius:6px;transition:border-color .12s,color .12s,background .12s;white-space:nowrap}
+.kv .qchip:hover{border-color:var(--teal-line);color:var(--ink);background:var(--teal-bg)}
+.kv .qchip i{font-style:normal;font-family:var(--font);font-size:11px;color:var(--faint)}
+.kv .qchip em{font-style:normal;font-family:var(--font);font-size:10.5px;color:var(--bad);border:1px solid var(--red-line);border-radius:4px;padding:0 3px}
+.kv .qchip code{font-family:var(--font-mono);font-size:10.5px;color:var(--teal);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv .qchip.on{border-color:var(--teal-line);color:var(--ink);background:var(--teal-bg)}
+.kv .qchip.miss{border-color:var(--red-line);color:var(--ink);background:var(--bad-bg)}

@@ -129,6 +129,22 @@ DELETE /api/docs/:id                                     删除手册
 - **节点属性**：点节点在右侧面板改名称 / 方法 / URL / **Body（JSON）** / 重试 / 幂等键 / 断言；URL 与 Body 里可写 `{{input.x}}`（流程输入）或 `{{nodes.节点id.output.字段}}`（上游输出）。
 - 所有结构性改动**自动保存草稿**（防抖 600ms），保存后第二道闸（Dry-run）重置为未执行——结构变了旧结果不算数，发布前需重跑。UI 回归：`node test-canvas-edit.js`。
 
+## 业务错误信封与参数提示（200 里的错误不再装成功）
+
+很多网关把业务错误包在 HTTP 200 里返回，比如移动云 OpenAPI：
+
+```json
+{"code":"010024","message":"参数校验异常,poolId","state":"ERROR"}
+```
+
+不识别的话，节点会绿灯通过、流程「成功」结束、下游拿到一坨错误 JSON。平台现在做了三层：
+
+- **信封识别**（`lib/bizerr.js`）：HTTP 200 且响应体是错误信封（`state: ERROR` / `success: false` / 非 0 的 `code` + `message`）时，节点标红、流程判失败；`参数校验异常,poolId` / `Input parameter AccessKey missing` / `不支持该产品类型:ecs` 这类消息会被解析成「缺少必填参数 poolId（资源池 ID）」「认证参数缺失」「参数 productType 不接受取值 ecs」这样的可执行提示。正常响应（成功信封、普通业务对象）不会误判。
+- **参数候选**（`lib/paramhint.js`）：SDK 生成的客户端方法往往只有一个 `xxx_request` 参数，真正的 query 字段藏在 `model/<op>_query.py` 的 setter 里。导入 SDK 时顺带从资料库抽出 `<Op>Query` 类字段，节点属性面板的 Query 区给出「可加参数」候选（中文名 + 必填徽标 + 学到的示例值），点一下即加一行。
+- **参数学习**（`data/paramhints.json`）：网关校验是「一个参数一个参数地报」——先报 poolId，补了再报 productType。每次报错把缺参记为该接口的必填项，跑通后把取值记成示例；下一次用自然语言搭同一条流程时会自动带上（「资源池：CIDR-XX」这类描述也会被抽成 poolId 取值）。`DELETE /api/ops/:id/params` 可清空某接口学到的提示。
+
+回归：`bash test-params.sh`（10 项：信封识别单元 / Query 字段抽取 / 槽位抽取 / 200+错误判失败 / 逐参学习 / 参数接口 / 坏取值提示 / 清理）。
+
 ## 多流程并行执行
 
 流程列表页勾选多个已发布流程 →「▶▶ 并行执行」→ 设定并发度（2~8）→ 一键同时开跑：
@@ -219,7 +235,7 @@ DELETE /api/docs/:id                                     删除手册
 ## 测试
 
 ```bash
-bash test-e2e.sh        # 12 项后端全链路回归（T1~T10，含重放/diff/告警/SSE/循环/定时）
+bash test-e2e.sh        # 14 项后端全链路回归（重放/diff/告警/SSE/循环/Query/定时落库）
 bash test-sources.sh    # 9 项接口接入回归（URL/粘贴/手工/冲突后缀/指纹漂移检测/卸载还原）
 bash test-auth.sh       # 23 项认证回归（凭证 CRUD/签名/两级绑定/脱敏）
 bash test-debug.sh      # 26 项搭建器调试回归（自动修复/自动断言/调试运行/断言引擎）
@@ -229,12 +245,14 @@ bash test-sdk.sh        # 19 项 SDK 导入回归（五语言解析/混合导入
 bash test-pip.sh        # 11 项 pip 安装导入回归（包名校验/装包分析/两步导入/换版本重装/卸载清理）
 bash test-archive.sh    # 12 项压缩包/文件夹导入回归（zip/tar.gz 解压/噪声跳过/token 两步/真实 SDK 包）
 bash test-materials.sh  # 9 项 SDK 资料库回归（符号抽取/中英文检索/类型过滤/智能体引用/卸载清理）
-bash test-extension.sh  # 63 项 Chrome 插件接入回归（默认开放/四类意图/执行闸门/令牌/AK-SK/强制认证/降级自愈）
+bash test-extension.sh  # 65 项 Chrome 插件接入回归（默认开放/四类意图/执行闸门/令牌/AK-SK/强制认证/降级自愈）
+bash test-params.sh     # 10 项参数提示回归（200 业务错误信封/缺参提取/参数学习/自动带参）
+node test-canvas-edit.js # 画布手动编辑 UI 回归（27 项；需 playwright + 本机 Chrome）
 node test-ui.js         # 前端三界面自动化（需 playwright；NODE_PATH 指向 node_modules）
 node test-sources-ui.js # 前端「接口接入」链路自动化（空态→接入→注册表→搭建器可用）
 ```
 
-最近一轮：**自然语言 20 + 帮助手册 21 + 全链路 e2e 12 + Chrome 插件 64 + 认证 22 + 注册表批量删除 16 + pip 11 + SDK 导入 21 + 压缩包 12 + 调试 26 + 资料库 9 + 接入 9 全部通过（共 243 项；并行批跑 32 项需 ≥4 条已发布流程另测）。测试套件已全部「种子自保障」：不依赖平台里的用户数据，自建夹具、退出自动清理还原。**
+最近一轮：**自然语言 20 + 帮助手册 21 + 全链路 e2e 14 + 参数提示 10 + Chrome 插件 65 + 认证 29 + 注册表批量删除 16 + pip 11 + SDK 导入 21 + 压缩包 12 + 调试 26 + 资料库 9 + 接入 9 + 画布编辑 27 全部通过（共 290 项；并行批跑需 ≥4 条已发布流程另测）。测试套件已全部「种子自保障」：不依赖平台里的用户数据，自建夹具、退出自动清理还原。**
 
 ## 设计对齐说明
 

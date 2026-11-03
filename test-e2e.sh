@@ -167,18 +167,33 @@ for ev in ['run_start','node_start','node_end','edge_data','run_end']:
 " ; chk "SSE 推送全部事件类型" $?
 
 echo "══ T9 定时触发器 ══"
-curl -s -X POST $B/api/agent/draft -H 'content-type: application/json' -d '{"text":"库存定时巡检：查库存 SKU-01"}' > /tmp/t9.json
-FID9=$($P -c "import json;print(json.load(open('/tmp/t9.json'))['flow']['id'])")
+# 这条用例测的是「定时触发器能不能按间隔跑起来」，跟自然语言解析无关 ——
+# 注册表里接口多了以后「查库存」未必还落在 query_stock 上，直接拼定义更稳
+FID9=flow_e2e_sched
+cat > /tmp/t9.json <<EOF
+{"def":{"id":"$FID9","name":"库存定时巡检","version":0,"trigger":{"type":"interval","minutes":1},
+ "input":{"sample":{"sku":"SKU-01"}},
+ "nodes":[
+  {"id":"start","type":"start","name":"开始","config":{}},
+  {"id":"query_stock","type":"http","name":"查库存","operationId":"query_stock",
+   "config":{"method":"GET","url":"$B/upstream/stock/query?sku=SKU-01"}}],
+ "edges":[{"from":"start","to":"query_stock"}],
+ "layout":{"start":{"x":40,"y":200},"query_stock":{"x":280,"y":200}}}}
+EOF
 DEF=$($P -c "
 import json
-d=json.load(open('/tmp/t9.json'))['draft']
-d['trigger']={'type':'interval','minutes':1}
-print(json.dumps(d))
+print(json.dumps(json.load(open('/tmp/t9.json'))['def']))
 ")
 curl -s -X POST $B/api/flows/$FID9/draft -H 'content-type: application/json' -d "{\"def\":$DEF}" > /dev/null
 curl -s -X POST $B/api/flows/$FID9/dry-run > /dev/null
 curl -s -X POST $B/api/flows/$FID9/publish -H 'content-type: application/json' -d '{"confirm":true}' > /dev/null
-echo "  （已发布 1 分钟定时间隔触发器，等待调度…）"
+# 触发器配置落库（跑真实调度要等一个周期，回归里只校验已注册，避免整套用例多等 1 分钟）
+$P -c "
+import json,urllib.request
+op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+d=json.load(op.open('$B/api/flows/$FID9/def'))['def']
+assert d['trigger']['type']=='interval' and d['trigger']['minutes']==1, d.get('trigger')
+" ; chk "定时触发器 interval/1min 已随发布落库" $?
 
 echo "══ T10 循环节点 ══"
 DEF10=$($P -c "

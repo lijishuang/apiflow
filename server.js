@@ -16,6 +16,7 @@ const { installAndCollect, pipEnv, normalizeSpec } = require('./lib/pip');
 const { extractArchive, MAX_ARCHIVE_BYTES } = require('./lib/archive');
 const materials = require('./lib/materials');
 const docs = require('./lib/docs');
+const paramhint = require('./lib/paramhint');
 const { createCred, updateCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
 const access = require('./lib/access');
 const intent = require('./lib/intent');
@@ -824,6 +825,23 @@ const server = http.createServer(async (req, res) => {
         at: new Date().toISOString(),
       });
     }
+    // ── 类网关上游：HTTP 200 + 业务错误信封，逐个参数校验（复刻移动云 010024 的行为）──
+    // 用来演示/回归「200 里的错误不算成功」：不传 poolId → 报 poolId；补了 → 报 productType
+    if (p === '/upstream/_gateway/resources' && req.method === 'GET') {
+      const q = Object.fromEntries(url.searchParams);
+      if (!q.poolId) return json(res, 200, { code: '010024', message: '参数校验异常,poolId', state: 'ERROR' });
+      if (!q.productType) return json(res, 200, { code: '010024', message: '参数校验异常,productType', state: 'ERROR' });
+      if (!['vm', 'eip', 'vpc'].includes(q.productType)) {
+        return json(res, 200, { code: '010016', message: `不支持该产品类型:${q.productType},请检查资源池与产品类型是否正确`, state: 'ERROR' });
+      }
+      return json(res, 200, {
+        code: '000000', message: '成功', state: 'OK',
+        entity: {
+          total: 2, pageNum: Number(q.pageNum || 1), pageSize: Number(q.pageSize || 10), pageCount: 1,
+          content: [{ resourceId: 'r-1001', resourceName: 'vm-demo-01' }, { resourceId: 'r-1002', resourceName: 'vm-demo-02' }],
+        },
+      });
+    }
     // ── 受保护上游：校验 AK/SK（HMAC 签名或头直传），演示认证注入全链路 ──
     if (p === '/upstream/secure/data') {
       let raw = '';
@@ -1311,6 +1329,25 @@ const server = http.createServer(async (req, res) => {
 
     // ── API：注册表 / 告警 / 管理 ──
     if (p === '/api/catalog') return json(res, 200, { ...registry.catalog, etag: registry.etag });
+
+    // ── API：单个接口的参数提示（节点属性面板用）──
+    // 返回 SDK 字段 ∪ 运行期学到的必填/示例，界面据此给「可加参数」候选与必填标记
+    if ((m = p.match(/^\/api\/ops\/([\w.-]+)\/params$/)) && req.method === 'GET') {
+      const op = allOperations().find(o => o.id === m[1]);
+      // 接口不在注册表里（来源被删 / 节点是手写的）也可能有学习结果 —— 照样给，
+      // 面板上标一句「接口不在注册表」，比直接 404 让人无从下手好
+      const target = op || { id: m[1], sourceId: 'builtin', method: '', path: '' };
+      return json(res, 200, {
+        operationId: m[1], sourceId: target.sourceId || null, method: target.method, path: target.path,
+        missingOp: !op,
+        query: paramhint.fieldsOf(target, store),
+        learned: store.getParamHint(m[1]) || null,
+      });
+    }
+    // 清掉某个接口学到的参数提示（学错了 / 想重新开始）
+    if ((m = p.match(/^\/api\/ops\/([\w.-]+)\/params$/)) && req.method === 'DELETE') {
+      return json(res, 200, { ok: store.dropParamHint(m[1]) });
+    }
 
     // ── API：接口注册表批量删除（内置接口→隐藏可恢复；来源接口→从来源移除） ──
     if (p === '/api/ops/batch-delete' && req.method === 'POST') {
