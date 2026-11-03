@@ -2089,7 +2089,15 @@ function renderCreds() {
       <div class="m">AK：${esc(c.ak)}</div>
       <div class="m">SK：${esc(c.sk)}（已掩码）</div>
       <div class="m">已绑定 ${boundCount(c.id)} 个接口 · 创建于 ${new Date(c.createdAt).toLocaleString('zh-CN')}</div>
-      <div class="acts"><button class="btn" onclick="removeCred('${c.id}')">删除</button></div>
+      <div class="acts">
+        <select title="切换签名模式：调用移动云接口须选「移动云 V2.0 签名」（认证参数放 query），选错会报 AccessKey missing"
+          onchange="updateCredMode('${c.id}', this.value)">
+          <option value="hmac" ${c.mode === 'hmac' ? 'selected' : ''}>HMAC 签名</option>
+          <option value="header" ${c.mode === 'header' ? 'selected' : ''}>头直传</option>
+          <option value="ecloud" ${c.mode === 'ecloud' ? 'selected' : ''}>移动云 V2.0 签名</option>
+        </select>
+        <button class="btn" onclick="removeCred('${c.id}')">删除</button>
+      </div>
     </div>`).join('')
     : '<div class="empty">还没有凭证。新建后可绑定到单个接口，或设为某个流程的流程级认证 —— 受保护接口（如「受保护数据」）未认证时返回 401。</div>';
 }
@@ -2123,6 +2131,13 @@ async function submitCred() {
     $('#credMsg').innerHTML = `<div class="msg-bad">${esc(e.message)}</div>`;
     btn.disabled = false;
   }
+}
+async function updateCredMode(id, mode) {
+  try {
+    const r = await api('/api/creds/' + id, { method: 'PUT', body: JSON.stringify({ mode }) });
+    await loadCreds();
+    toast(`凭证「${r.cred.name}」已切换为${credModeLabel(mode)}——引用它的流程下次运行立即生效`);
+  } catch (e) { alert('切换失败：' + e.message); await loadCreds(); }
 }
 async function removeCred(id) {
   const c = state.creds.find(x => x.id === id);

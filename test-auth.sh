@@ -89,6 +89,23 @@ LEAK=$(curl -s "$BASE/api/runs?flowId=flow_auth_t" | node -pe 'const r=JSON.pars
 case "$LEAK" in *"$SK"*) bad "SK 泄漏进运行记录！";; *) ok "运行记录无 SK 明文";; esac
 case "$LEAK" in *'x-api-secret'*) bad "header 模式 SK 泄漏";; *) ok "无 x-api-secret 字段";; esac
 
+step "C10b 更新凭证：切 ecloud 模式 / 换 AK / 非法值拒绝（无需删除重建）"
+UP=$(curl -s -X PUT $BASE/api/creds/$CRED2 -H 'content-type: application/json' -d '{"mode":"ecloud","name":"第二凭证-移动云"}')
+echo "$UP" | grep -q '"mode":"ecloud"' && ok "切换为 ecloud 模式" || bad "切模式失败: $UP"
+echo "$UP" | grep -q '第二凭证-移动云' && ok "改名生效" || bad "改名失败: $UP"
+UPBAD=$(curl -s -o /dev/null -w '%{http_code}' -X PUT $BASE/api/creds/$CRED2 -H 'content-type: application/json' -d '{"mode":"magic"}')
+check "非法 mode → 400" 400 "$UPBAD"
+UP404=$(curl -s -o /dev/null -w '%{http_code}' -X PUT $BASE/api/creds/cred_nosuch -H 'content-type: application/json' -d '{"mode":"ecloud"}')
+check "不存在的凭证 → 400" 400 "$UP404"
+# ecloud 是给移动云公网网关用的（认证参数进 query）；平台内部受保护上游只认
+# 请求头签名，所以这里运行必然 401 —— 正确的断言是「请求确实走了签名 URL」
+RUN5=$(curl -s -X POST $BASE/api/flows/flow_auth_t/run -H 'content-type: application/json' -d '{}')
+echo "$RUN5" | grep -q '"status":"failed"' && ok "对平台内部受保护上游运行失败（401，ecloud 签名只对移动云网关有效，符合预期）" || bad "行为异常: $RUN5"
+EURL=$(curl -s "$BASE/api/runs?flowId=flow_auth_t" | node -pe 'const r=JSON.parse(require("fs").readFileSync(0))[0]; r.nodes.call_secure.request.url || ""')
+case "$EURL" in *"AccessKey=$AK2"*"Signature="*|*"AccessKey=$AK2"*"Signature%"*) ok "请求 URL 带 AccessKey 与 Signature（认证参数进 query）";; *) bad "ecloud 签名未进 URL: ${EURL:0:120}";; esac
+UPAK=$(curl -s -X PUT $BASE/api/creds/$CRED2 -H 'content-type: application/json' -d '{"ak":"AKUPDATED99"}')
+echo "$UPAK" | grep -q 'AKUPDATED99' && ok "换 AK 生效（模式保持 ecloud）" || bad "换 AK 失败: $UPAK"
+
 step "C11 删除凭证 → 绑定与流程级 authId 自动清理"
 curl -s -X DELETE $BASE/api/creds/$CRED_ID > /dev/null
 curl -s -X DELETE $BASE/api/creds/$CRED2 > /dev/null

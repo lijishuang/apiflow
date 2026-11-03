@@ -16,7 +16,7 @@ const { installAndCollect, pipEnv, normalizeSpec } = require('./lib/pip');
 const { extractArchive, MAX_ARCHIVE_BYTES } = require('./lib/archive');
 const materials = require('./lib/materials');
 const docs = require('./lib/docs');
-const { createCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
+const { createCred, updateCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
 const access = require('./lib/access');
 const intent = require('./lib/intent');
 
@@ -1728,6 +1728,14 @@ const server = http.createServer(async (req, res) => {
       if (body.credId && !store.getCred(body.credId)) return json(res, 404, { error: '凭证不存在' });
       store.setOpBinding(body.operationId, body.credId || null);
       return json(res, 200, { ok: true, operationId: body.operationId, credId: body.credId || null });
+    }
+    // 更新凭证：换模式（如 hmac → ecloud 接移动云）/ 换 AK / 换 SK / 改名，id 不变所以绑定关系都还在
+    if ((m = p.match(/^\/api\/creds\/([\w-]+)$/)) && req.method === 'PUT') {
+      const body = await readBody(req);
+      try {
+        const cred = updateCred(m[1], body);
+        return json(res, 200, { ok: true, cred: { ...cred, sk: maskSk(cred.sk) } });
+      } catch (e) { return json(res, 400, { error: e.message }); }
     }
     if ((m = p.match(/^\/api\/creds\/([\w-]+)$/)) && req.method === 'DELETE') {
       if (!store.getCred(m[1])) return json(res, 404, { error: '凭证不存在' });
