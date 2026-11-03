@@ -638,6 +638,12 @@ tbody tr:hover{background:var(--bg2)}
 .canvas-tools{position:absolute;top:10px;left:10px;z-index:8;display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 10px;box-shadow:var(--shadow-s);flex-wrap:wrap;max-width:calc(100% - 20px)}
 .canvas-tools .note{margin:0}
 .node-del{border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;line-height:1;padding:3px 5px;border-radius:5px;flex:none}
+/* 节点连接点：hover 浮现，按住拖到目标节点松手即连线 */
+.node-port{position:absolute;right:-9px;top:19px;width:15px;height:15px;border-radius:50%;background:var(--bg2);border:2px solid var(--edge-marker);cursor:crosshair;opacity:0;transition:opacity .15s,border-color .15s,background .15s;z-index:3;touch-action:none}
+.node:hover .node-port,.node-port.dragging-port{opacity:1}
+.node-port:hover,.node-port.dragging-port{border-color:var(--blue);background:var(--blue-bg)}
+.node.link-hover{outline:2px dashed var(--blue);outline-offset:3px;border-color:var(--blue)}
+svg path.edge-tmp{stroke:var(--blue)}
 /* 画布节点悬停全文提示：跟随鼠标，被截断的文字在这里看完整版（背景用主题表面色，深浅模式自动适配） */
 #nodeTip{position:fixed;z-index:400;pointer-events:none;max-width:420px;background:var(--bg-soft);color:var(--ink);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow-l);padding:7px 11px;font-size:12.5px;line-height:1.55;opacity:0;transform:translateY(3px);transition:opacity .12s,transform .12s}
 #nodeTip.show{opacity:1;transform:none}

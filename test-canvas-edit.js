@@ -40,10 +40,10 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   if (await page.locator('#opPickList .oprow').count() > 0) await page.locator('#opPickList .oprow').first().click();
   else await page.evaluate(id => pickOperation(id), pick1.id);   // 名字搜不到时直接点选
   await sleep(700);
-  eq('添加后画布 3 节点（2 真实 + 1 自动结束）', 3, await page.locator('#buildCanvas .node').count());
-  eq('「结束」终点自动出现', 1, await page.locator('#buildCanvas .end-node').count());
+  eq('添加后画布 2 节点（start + 接口，无自动终点）', 2, await page.locator('#buildCanvas .node').count());
+  eq('孤立接口不生成「结束」终点', 0, await page.locator('#buildCanvas .end-node').count());
   let endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
-  eq('出口→结束 虚线汇聚（1 条）', 1, endEdges);
+  eq('未接入流程的接口没有 END 虚线（0 条）', 0, endEdges);
   let edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
   eq('新接口不自动连线（0 条实线）', 0, edges);
   // 第二个接口（换一个不同的 op）
@@ -59,9 +59,9 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   if (await page.locator('#opPickList .oprow').count() > 0) await page.locator('#opPickList .oprow').first().click();
   else await page.evaluate(id => pickOperation(id), pick2.id);
   await sleep(700);
-  eq('添加第二个接口后 4 节点（3 真实 + 1 结束）', 4, await page.locator('#buildCanvas .node').count());
+  eq('添加第二个接口后 3 节点（均未连线，无终点）', 3, await page.locator('#buildCanvas .node').count());
   endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
-  eq('两个出口各一条虚线（2 条）', 2, endEdges);
+  eq('全部孤立 → 仍无 END 虚线（0 条）', 0, endEdges);
   edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
   eq('第二个接口也不自动连线（仍 0 条实线）', 0, edges);
 
@@ -80,13 +80,19 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   (hint2.includes('目标') ? ok : bad)('提示选目标: ' + hint2);
   await page.locator('#buildCanvas .node').nth(1).click();
   await sleep(500);
-  await page.click('#btnLinkMode'); await sleep(200);
-  await page.locator('#buildCanvas .node').nth(1).click();
-  await sleep(300);
-  await page.locator('#buildCanvas .node').nth(2).click();
+  // 第二条边用「连接点拖拽」：按住 n1 右侧圆点拖到 n2 松手
+  const port1 = await page.locator('#buildCanvas .node').nth(1).locator('.node-port').boundingBox();
+  await page.mouse.move(port1.x + port1.width / 2, port1.y + port1.height / 2);
+  await page.mouse.down();
+  const n2b = await page.locator('#buildCanvas .node').nth(2).boundingBox();
+  await page.mouse.move(n2b.x + n2b.width / 2, n2b.y + n2b.height / 2, { steps: 8 });
+  await page.mouse.up();
   await sleep(500);
   edges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-path, #buildCanvas svg path.edge-else').length);
-  eq('手动连两条边成功（start→n1→n2）', 2, edges);
+  eq('手动连两条边成功（按钮 + 拖拽各一条）', 2, edges);
+  eq('接入后出口出现「结束」终点', 1, await page.locator('#buildCanvas .end-node').count());
+  endEdges = await page.evaluate(() => document.querySelectorAll('#buildCanvas svg path.edge-end').length);
+  eq('链尾出口→END 虚线出现（1 条）', 1, endEdges);
 
   console.log('── E4 节点属性面板（body 编辑）──');
   await page.locator('#buildCanvas .node').nth(2).click();

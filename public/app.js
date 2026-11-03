@@ -887,15 +887,23 @@ function renderCanvas(el, def, mode, runState) {
       div.classList.add('st-sel');
       onNodeClick(n, mode);
     };
-    if (mode === 'edit') enableDrag(div, canvas, n.id);
+    if (mode === 'edit') {
+      enableDrag(div, canvas, n.id);
+      const port = document.createElement('span');
+      port.className = 'node-port';
+      port.title = '从此处拖到目标节点松手即连线；单击则进入连线模式（Esc 取消）';
+      div.appendChild(port);
+      enablePortLink(port, div, canvas, n.id);
+    }
     el.appendChild(div);
   }
 
   // 虚拟「结束」终点：出度为 0 的非 start 节点就是流程出口，从各出口引虚线汇到这里。
   // 位置可拖动（记忆在 layout.__end__，随草稿/发布保存）；def.end.assert 结束断言在流程跑完后由引擎统一校验。
-  const outDeg = {};
-  for (const e of def.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
-  const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0));
+  const outDeg = {}, inDeg = {};
+  for (const e of def.edges || []) { outDeg[e.from] = (outDeg[e.from] || 0) + 1; inDeg[e.to] = (inDeg[e.to] || 0) + 1; }
+  // 出口 = 已接入流程（有入边）且没有出边的节点；孤立的新节点还没进流程，不引 END 虚线
+  const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0) && inDeg[n.id] > 0);
   if (exits.length) {
     const manual = layout.__end__ && typeof layout.__end__.x === 'number' ? layout.__end__ : null;
     const endPos = manual ? { x: manual.x, y: manual.y, w: 136, h: 66 } : endNodePos(pos, exits);
@@ -956,9 +964,10 @@ function endNodePos(pos, exits) {
 // 用户手动拖过的终点（layout.__end__）保持手动位置，只更新虚线
 function repositionEndNode(canvas) {
   const { el, def, pos } = canvas;
-  const outDeg = {};
-  for (const e of def.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
-  const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0));
+  const outDeg = {}, inDeg = {};
+  for (const e of def.edges || []) { outDeg[e.from] = (outDeg[e.from] || 0) + 1; inDeg[e.to] = (inDeg[e.to] || 0) + 1; }
+  // 出口 = 已接入流程（有入边）且没有出边的节点；孤立的新节点还没进流程，不引 END 虚线
+  const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0) && inDeg[n.id] > 0);
   const endEl = el.querySelector('.end-node');
   if (!exits.length) {                          // 出口没了（节点被删光）→ 终点一并收起
     if (endEl) endEl.remove();
@@ -1040,6 +1049,58 @@ function enableDrag(div, canvas, id) {
   div.addEventListener('pointerup', finish);
   div.addEventListener('pointercancel', finish);
   div.addEventListener('lostpointercapture', finish);
+}
+/* 连接点拖拽连线：按住节点右侧圆点拖到目标节点松手即建带方向的边；单击则从该节点进入连线模式 */
+function enablePortLink(port, div, canvas, id) {
+  let st = null;
+  port.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0 && ev.pointerType === 'mouse') return;
+    ev.stopPropagation(); ev.preventDefault();
+    const svg = canvas.el.querySelector('svg.edges');
+    const tmp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tmp.setAttribute('class', 'edge-tmp');
+    tmp.setAttribute('stroke-width', '1.5');
+    tmp.setAttribute('stroke-dasharray', '4 4');
+    tmp.setAttribute('fill', 'none');
+    tmp.style.pointerEvents = 'none';
+    svg.appendChild(tmp);
+    st = { pid: ev.pointerId, tmp, hover: null, moved: false };
+    port.classList.add('dragging-port');
+    try { port.setPointerCapture(ev.pointerId); } catch {}
+  });
+  const pickTarget = (x, y) => {
+    const t = document.elementFromPoint(x, y);
+    const nd = t && t.closest ? t.closest('.node') : null;
+    return nd && nd.dataset.node && nd.dataset.node !== id && nd.dataset.node !== '__end__' ? nd : null;
+  };
+  port.addEventListener('pointermove', ev => {
+    if (!st || ev.pointerId !== st.pid) return;
+    st.moved = true;
+    const rect = canvas.el.getBoundingClientRect();
+    const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
+    st.tmp.setAttribute('d', edgeGeometry(canvas.pos[id], { x: cx + 6, y: cy - 26 }).d);
+    const target = pickTarget(ev.clientX, ev.clientY);
+    if (st.hover && st.hover !== target) st.hover.classList.remove('link-hover');
+    if (target && st.hover !== target) target.classList.add('link-hover');
+    st.hover = target;
+  });
+  const finish = ev => {
+    if (!st || (ev.pointerId !== undefined && ev.pointerId !== st.pid)) return;
+    // 松手时按坐标现算目标，不依赖 move 过程的 hover 缓存（快速拖拽/自动化下最后一帧 move 可能没被处理）
+    const target = pickTarget(ev.clientX, ev.clientY) || st.hover, moved = st.moved;
+    try { if (port.hasPointerCapture(st.pid)) port.releasePointerCapture(st.pid); } catch {}
+    port.classList.remove('dragging-port');
+    st.tmp.remove();
+    if (st.hover) st.hover.classList.remove('link-hover');
+    st = null;
+    div.__justDragged = true;                        // 抑制随后的 click（避免误开属性面板/误连线）
+    if (!moved) { setLinkMode({ from: id }); return; }   // 单击端口 = 从该节点进入连线模式
+    if (target) { addEdge(id, target.dataset.node); renderBuildCanvas(); }
+    else toast('松手位置不在目标节点上 —— 按住连接点拖到目标节点再松手', 'bad');
+  };
+  port.addEventListener('pointerup', finish);
+  port.addEventListener('pointercancel', finish);
+  port.addEventListener('click', ev => ev.stopPropagation());   // 点击归属端口自己处理
 }
 function setNodePos(canvas, id, x, y) {
   const p = canvas.pos[id];
@@ -1440,7 +1501,7 @@ $('#btnNewBlank').onclick = async () => {
   switchTab('build');
   renderBuildCanvas(); renderGates(); refreshBuildFlowSel();
   $('#nodeForm').innerHTML = '<span class="note">点击画布节点进行编辑</span>';
-  addChat('agent', '已创建空白流程。点「＋ 添加接口」加第一步，节点之间用「⇄ 连线」或直接拖不动时点节点右侧按钮连接。');
+  addChat('agent', '已创建空白流程。点「＋ 添加接口」加节点（不会自动连线），节点之间把鼠标移到节点上、按住右侧出现的 ● 连接点拖到目标节点松手即连（也可点工具栏「⇄ 连线」后先后点起点和终点）。');
 };
 
 /* ── 搭建器「当前流程」：下拉切换 / 新建入口 ──
@@ -1552,9 +1613,9 @@ function pickOperation(opId) {
   if (op.params && op.params.length) {
     const miss = op.params.filter(p => !d.nodes.find(x => x.id === nid).config.url.includes('{' + p + '}'));
     if (miss.length) toast(`接口「${op.name}」需要参数：${miss.join(', ')} —— 点开节点在 URL 里填值或写 {{input.x}}`, 'bad');
-    else toast(`已添加「${op.name}」（未连线）—— 点工具栏「⇄ 连线」手动接入流程；URL 里的 {${op.params.join('}/{')}} 占位符要替换成实际值`);
+    else toast(`已添加「${op.name}」（未连线）—— 按住节点右侧 ● 拖到目标节点松手即连，或点工具栏「⇄ 连线」；URL 里的 {${op.params.join('}/{')}} 占位符要替换成实际值`);
   } else {
-    toast(`已添加「${op.name}」（未连线）—— 点工具栏「⇄ 连线」手动接入流程；位置可拖动调整`);
+    toast(`已添加「${op.name}」（未连线）—— 按住节点右侧 ● 拖到目标节点松手即连，或点工具栏「⇄ 连线」；位置可拖动调整`);
   }
   onNodeClick(node, 'edit');   // 直接打开属性面板，引导补参数
   const el = $('#buildCanvas').querySelector(`[data-node="${nid}"]`);
