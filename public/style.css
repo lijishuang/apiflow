@@ -774,3 +774,7 @@ tbody tr:hover{background:var(--bg2)}
 .em-row .em-del:hover{color:var(--bad)}
 #edgeChips .qchip{margin:0 6px 6px 0}
 #edgeChips .qchip:hover{border-color:var(--ok);color:var(--ok)}
+
+/* ── 边中点「重接」按钮（与 ✕ 删除并排） ── */
+.edge-rw{position:absolute;z-index:5;width:16px;height:16px;border-radius:50%;background:var(--bg2);border:1px solid var(--line-soft);color:var(--muted);font-size:10px;line-height:14px;text-align:center;cursor:pointer;user-select:none}
+.edge-rw:hover{border-color:var(--ok);color:var(--ok);transform:scale(1.15)}

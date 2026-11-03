@@ -826,7 +826,7 @@ function renderCanvas(el, def, mode, runState) {
     el.appendChild(chip);
 
     rec = { from: e.from, to: e.to, path, label, chip, map: (e.map && Object.keys(e.map).length) ? e.map : null };
-    // 编辑模式下，边中点放一个小 ✕：点一下就删掉这条连线
+    // 编辑模式下，边中点放两个小按钮：✕ 删除、⇄ 重接（改起点/终点，不用删了重画）
     if (mode === 'edit') {
       const del = document.createElement('div');
       del.className = 'edge-del'; del.textContent = '✕';
@@ -834,6 +834,12 @@ function renderCanvas(el, def, mode, runState) {
       del.onclick = ev => { ev.stopPropagation(); removeEdge(e.from, e.to); };
       el.appendChild(del);
       rec.del = del;
+      const rw = document.createElement('div');
+      rw.className = 'edge-rw'; rw.textContent = '⇄';
+      rw.title = `重接这条连线（当前 ${nodeName(e.from)} → ${nodeName(e.to)}）：先点新起点，再点新终点`;
+      rw.onclick = ev => { ev.stopPropagation(); startRewire(e.from, e.to); };
+      el.appendChild(rw);
+      rec.rw = rw;
       // 已配置数据映射：边中点上方挂 ⚡ 徽标，点击编辑
       if (rec.map) {
         const mb = document.createElement('div');
@@ -986,6 +992,7 @@ function updateEdge(canvas, rec) {
     rec.chip.style.top = ((g.y1 + g.y2) / 2 - 12) + 'px';
   }
   if (rec.del) { rec.del.style.left = ((g.x1 + g.x2) / 2 - 8) + 'px'; rec.del.style.top = ((g.y1 + g.y2) / 2 + 12) + 'px'; }
+  if (rec.rw) { rec.rw.style.left = ((g.x1 + g.x2) / 2 - 8) + 'px'; rec.rw.style.top = ((g.y1 + g.y2) / 2 + 34) + 'px'; }
   if (rec.mapBadge) { rec.mapBadge.style.left = ((g.x1 + g.x2) / 2 - 14) + 'px'; rec.mapBadge.style.top = ((g.y1 + g.y2) / 2 - 30) + 'px'; }
 }
 function updateEdgesFor(canvas, id) {
@@ -1466,19 +1473,35 @@ function pickOperation(opId) {
   };
   if (op.readOnly === false) node.idempotencyKey = '{{run.num}}-' + nid;   // 与自然语言生成的写操作保持一致
   d.nodes.push(node);
-  // 布局：接在当前链尾（出度为 0 的节点）右边；条件节点有分支语义，不当链尾
+  // 布局：优先放在当前选中节点的正下方（就近添加，拖动可再微调）；没有选中才退化为链尾右侧
   const outDeg = {};
   for (const e of d.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
   const tail = d.nodes.filter(x => x.id !== nid && x.type !== 'condition' && !(outDeg[x.id] > 0)).pop();
   const start = d.nodes.find(x => x.id === 'start');
-  const anchor = tail || start;
-  const ax = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).x : 40;
-  const ay = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).y : 260;
+  const selId = state.selNode && state.selNode.id !== nid && d.nodes.some(x => x.id === state.selNode.id) ? state.selNode.id : null;
+  const anchor = (selId && d.nodes.find(x => x.id === selId)) || tail || start;
   d.layout = d.layout || {};
-  d.layout[nid] = { x: ax + (anchor ? nodeWidth(anchor) + 90 : 440), y: ay };
-  // 自动把新节点接到链尾；没有链尾（如空流程只有 start）就从 start 连出
-  if (tail) addEdge(tail.id, nid, true);
-  else if (start) addEdge('start', nid, true);
+  if (selId) {
+    // 选中节点下方找一个不重叠的空位（对齐左边缘，往下让位）
+    const sp = d.layout[selId] || { x: 40, y: 260 };
+    let ny = sp.y + 130;
+    const collides = (x, y) => d.nodes.some(o => {
+      if (o.id === nid) return false;
+      const p = d.layout[o.id]; if (!p) return false;
+      return Math.abs(p.x - x) < 210 && Math.abs(p.y - y) < 105;
+    });
+    while (collides(sp.x, ny)) ny += 110;
+    d.layout[nid] = { x: sp.x, y: ny };
+  } else {
+    const ax = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).x : 40;
+    const ay = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).y : 260;
+    d.layout[nid] = { x: ax + (anchor ? nodeWidth(anchor) + 90 : 440), y: ay };
+  }
+  // 自动把新节点接到锚点（选中的节点 / 链尾 / start）；条件分支标记由 addEdge 处理
+  if (anchor) {
+    if (!addEdge(anchor.id, nid, true) && anchor.type === 'condition')
+      toast(`「${anchor.name}」两个分支已占用 —— 新节点未连线，可用「连线」手动接`, 'bad');
+  }
   renderBuildCanvas();
   saveCanvasDraft();
   if (op.params && op.params.length) {
@@ -1486,7 +1509,7 @@ function pickOperation(opId) {
     if (miss.length) toast(`接口「${op.name}」需要参数：${miss.join(', ')} —— 点开节点在 URL 里填值或写 {{input.x}}`, 'bad');
     else toast(`已添加「${op.name}」，URL 里的 {${op.params.join('}/{')}} 占位符要替换成实际值`);
   } else {
-    toast(`已添加「${op.name}」${tail ? '，并接到 ' + tail.name : ''}`);
+    toast(`已添加「${op.name}」${anchor ? '，并接到「' + anchor.name + '」' : ''}—— 位置可拖动调整`);
   }
   onNodeClick(node, 'edit');   // 直接打开属性面板，引导补参数
   const el = $('#buildCanvas').querySelector(`[data-node="${nid}"]`);
@@ -1551,10 +1574,50 @@ function setLinkMode(v) {
   $('#buildCanvas').classList.toggle('linking', !!v);
   const h = $('#canvasHint');
   if (!v) { h.textContent = ''; return; }
+  if (v.rewire) {
+    h.textContent = v.from
+      ? `重接为「${nodeName(v.from)}」→ ? —— 点击新终点完成（Esc 取消）`
+      : `重接原连线 ${nodeName(v.rewire.from)} → ${nodeName(v.rewire.to)}：点击新起点（Esc 取消）`;
+    return;
+  }
   h.textContent = v.from ? `从「${nodeName(v.from)}」出发 —— 点击目标节点完成连线（Esc 取消）` : '连线模式：点击起点节点（Esc 取消）';
+}
+/* 重接连线：保留原边的数据映射，先后点 新起点 → 新终点 */
+function startRewire(from, to) {
+  setLinkMode({ rewire: { from, to }, from: null });
 }
 function handleLinkClick(nodeId) {
   if (!state.linkMode) return false;
+  if (state.linkMode.rewire) {
+    if (!state.linkMode.from) {
+      state.linkMode.from = nodeId;
+      const el = $('#buildCanvas').querySelector(`[data-node="${nodeId}"]`);
+      if (el) el.classList.add('link-from');
+      setLinkMode({ rewire: state.linkMode.rewire, from: nodeId });
+      return true;
+    }
+    const nf = state.linkMode.from, nt = nodeId;
+    const { from, to } = state.linkMode.rewire;
+    setLinkMode(null);
+    const d = state.draft;
+    if (nf === nt) { toast('起点和终点不能是同一个节点', 'bad'); renderBuildCanvas(); return true; }
+    const old = (d.edges || []).find(e => e.from === from && e.to === to);
+    if (!old) { renderBuildCanvas(); return true; }
+    if ((d.edges || []).some(e => e.from === nf && e.to === nt)) {
+      toast(`「${nodeName(nf)} → ${nodeName(nt)}」本来就有连线 —— 原连线已删除`, 'bad');
+      d.edges = (d.edges || []).filter(e => !(e.from === from && e.to === to));
+      renderBuildCanvas(); saveCanvasDraft(); return true;
+    }
+    d.edges = (d.edges || []).filter(e => !(e.from === from && e.to === to));
+    if (addEdge(nf, nt, true) && old.map && Object.keys(old.map).length) {
+      const ne = (d.edges || []).find(e => e.from === nf && e.to === nt);
+      if (ne) ne.map = old.map;   // 数据映射跟着边走
+    }
+    saveCanvasDraft();
+    toast(`已重接：${nodeName(from)} → ${nodeName(to)} 改为 ${nodeName(nf)} → ${nodeName(nt)}`);
+    renderBuildCanvas();
+    return true;
+  }
   if (!state.linkMode.from) {
     state.linkMode.from = nodeId;
     const el = $('#buildCanvas').querySelector(`[data-node="${nodeId}"]`);
