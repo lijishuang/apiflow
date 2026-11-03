@@ -18,6 +18,8 @@ const state = {
   debugRun: null,               // 搭建器调试运行（{id, nodes, status}），SSE 事件实时喂给调试面板
   batchJob: null,               // 并行批跑（{id,total,done,items[]}），轮询 /api/batches/:id 刷新
   batchTimer: null, batchHideBar: false,
+  news: null,                   // 版本更新记录（解析 CHANGELOG.md 的结果）
+  newsFilter: '全部', newsQuery: '',
 };
 
 /* ── 访问令牌：插件接入开启「强制认证」后，控制台也需要令牌 ──
@@ -79,6 +81,7 @@ _tabs.forEach(t => t.addEventListener('click', () => {
   if (t.dataset.s === 'list') loadFlows();
   if (t.dataset.s === 'api') loadApi();
   if (t.dataset.s === 'run') refreshRunFlows();
+  if (t.dataset.s === 'news') loadNews();
   if (t.dataset.s === 'build') { ensureCreds().then(syncDraftAuth); }   // 搭建器：认证下拉需要凭证列表
 }));
 window.addEventListener('resize', moveSlider);
@@ -3230,6 +3233,123 @@ $('#btnPlugin').onclick = openPlugin;
 $('#pluginClose').onclick = closePlugin;
 $('#pluginModal').addEventListener('click', e => { if (e.target.id === 'pluginModal') closePlugin(); });
 $('#loginModal').addEventListener('click', e => { if (e.target.id === 'loginModal') $('#loginModal').classList.add('hidden'); });
+
+/* ───────── 界面 5：版本更新记录（数据源 CHANGELOG.md） ───────── */
+// 分组配色：新增=绿、修复=红、变更=蓝，其余走中性；未知分组也给中性色
+const NEWS_TONE = { '新增': 'ok', '修复': 'bad', '变更': 'blue', '移除': 'amber', '废弃': 'amber', '安全': 'purple' };
+const newsTone = n => NEWS_TONE[n] || 'muted';
+
+async function loadNews(force) {
+  if (state.news && !force) { renderNews(); return; }
+  try {
+    state.news = await api('/api/changelog');
+  } catch (e) {
+    $('#newsBody').innerHTML = `<div class="empty">读不到版本记录：${esc(e.message)}</div>`;
+    return;
+  }
+  renderNews();
+}
+
+// 条目过滤：先按分组 chip，再按搜索词；版本号/日期命中时该版本全部条目保留
+function newsMatch(r, it, q, verHit) {
+  if (state.newsFilter !== '全部' && it.group !== state.newsFilter) return false;
+  if (!q) return true;
+  return verHit || String(it.text || '').toLowerCase().includes(q);
+}
+
+function renderNewsFilters(d) {
+  const counts = { '全部': 0 };
+  for (const r of d.releases) for (const g of r.groups) { counts[g.name] = (counts[g.name] || 0) + g.items.length; counts['全部'] += g.items.length; }
+  const names = ['全部', ...d.stats.groups.filter(n => counts[n])];
+  $('#newsFilters').innerHTML = names.map(n => `
+    <button class="nchip${state.newsFilter === n ? ' on' : ''}" data-f="${esc(n)}">${esc(n)}<span class="nchip-n">${counts[n] || 0}</span></button>`).join('');
+}
+
+function renderNews() {
+  const d = state.news;
+  const body = $('#newsBody'), idx = $('#newsIndex');
+  if (!d) return;
+  if (d.missing) {
+    $('#newsVersion').textContent = '版本 · —';
+    $('#newsFilters').innerHTML = '';
+    idx.innerHTML = '';
+    body.innerHTML = '<div class="empty">仓库根目录还没有 CHANGELOG.md —— 按 Keep a Changelog 格式建一个，这页会自动出现内容。</div>';
+    return;
+  }
+  $('#newsVersion').textContent = `v${d.currentVersion || '—'}${d.hasUnreleased ? ' · 有未发布改动' : ''}`;
+  renderNewsFilters(d);
+
+  const q = state.newsQuery.trim().toLowerCase();
+  const verHitOf = r => !!q && (String(r.version).toLowerCase().includes(q) || String(r.date || '').includes(q));
+  const view = [];
+  d.releases.forEach((r, i) => {
+    const verHit = verHitOf(r);
+    const groups = r.groups
+      .map(g => ({ name: g.name, items: g.items.filter(it => newsMatch(r, { ...it, group: g.name }, q, verHit)) }))
+      .filter(g => g.items.length);
+    const notes = r.notes.filter(n => state.newsFilter === '全部' && (!q || verHit || String(n.text || '').toLowerCase().includes(q)));
+    if (!groups.length && !notes.length) return;
+    view.push({ r, i, groups, notes });
+  });
+
+  idx.innerHTML = view.map(({ r, i }) => `
+    <button class="nidx" data-rel="${i}">
+      <span class="nidx-ver">${r.unreleased ? '未发布' : 'v' + esc(r.version)}</span>
+      <span class="nidx-date">${esc(r.date || '开发中')}</span>
+      <span class="nidx-n">${r.itemCount}</span>
+    </button>`).join('') || '<p class="note" style="padding:6px 2px">无匹配版本</p>';
+  if (idx.firstElementChild) idx.firstElementChild.classList.add('on');
+
+  body.innerHTML = view.length ? (d.intro.length ? `<p class="news-intro">${d.intro.join(' ')}</p>` : '') + view.map(({ r, i, groups, notes }) => `
+    <article class="release" id="rel-${i}">
+      <header class="rel-head">
+        <span class="rel-ver">${r.unreleased ? '未发布' : 'v' + esc(r.version)}</span>
+        ${r.unreleased ? '<span class="rel-badge unreleased">开发中</span>'
+          : (i === 0 || (d.hasUnreleased && i === 1)) ? '<span class="rel-badge latest">最新发布</span>' : ''}
+        ${r.date ? `<span class="rel-date">${esc(r.date)}</span>` : ''}
+        <span style="flex:1"></span>
+        <span class="note">${r.itemCount} 条改动</span>
+      </header>
+      ${notes.length ? `<p class="rel-note">${notes.map(n => n.html).join(' ')}</p>` : ''}
+      ${groups.map(g => `
+        <div class="rel-grp">
+          <span class="gtag ${newsTone(g.name)}">${esc(g.name)}</span>
+          <ul class="gitems">${g.items.map(it => `<li>${it.html}</li>`).join('')}</ul>
+        </div>`).join('')}
+    </article>`).join('')
+    : `<div class="empty">没有匹配${state.newsQuery ? `「${esc(state.newsQuery)}」` : ''}${state.newsFilter !== '全部' ? `「${esc(state.newsFilter)}」` : ''}的更新条目 —— 换个关键词，或点「全部」。</div>`;
+}
+
+$('#newsFilters')?.addEventListener('click', e => {
+  const b = e.target.closest('.nchip');
+  if (!b) return;
+  state.newsFilter = b.dataset.f;
+  renderNews();
+});
+if ($('#newsSearch')) {
+  let t = null;
+  $('#newsSearch').addEventListener('input', e => {
+    clearTimeout(t);
+    t = setTimeout(() => { state.newsQuery = e.target.value; renderNews(); }, 160);
+  });
+}
+$('#newsIndex')?.addEventListener('click', e => {
+  const b = e.target.closest('.nidx');
+  if (!b) return;
+  $('#newsIndex').querySelectorAll('.nidx').forEach(x => x.classList.toggle('on', x === b));
+  const el = document.getElementById('rel-' + b.dataset.rel);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+if ($('#newsRawBtn')) $('#newsRawBtn').onclick = async () => {
+  $('#newsRawModal').classList.remove('hidden');
+  $('#newsRawText').textContent = '加载中…';
+  try {
+    const r = await fetch('/api/changelog/raw');
+    $('#newsRawText').textContent = await r.text();
+  } catch (e) { $('#newsRawText').textContent = '读取失败：' + e.message; }
+};
+if ($('#newsRawClose')) $('#newsRawClose').onclick = () => $('#newsRawModal').classList.add('hidden');
+$('#newsRawModal')?.addEventListener('click', e => { if (e.target.id === 'newsRawModal') $('#newsRawModal').classList.add('hidden'); });
 
 /* 启动 */
 (async () => {

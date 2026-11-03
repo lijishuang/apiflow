@@ -17,6 +17,7 @@
     <button class="tab" data-s="api">接口</button>
     <button class="tab" data-s="build">搭建器</button>
     <button class="tab" data-s="run">运行观测</button>
+    <button class="tab" data-s="news">更新记录</button>
   </div>
   <span class="env" id="catalogBadge">注册表 · 加载中…</span>
   <button class="theme-toggle" id="btnPlugin" title="Chrome 插件接入 · 访问令牌" aria-label="插件接入">🧩</button>
@@ -335,6 +336,38 @@
     <div class="modal-head"><b>添加接口节点</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('opPickModal').classList.add('hidden')">关闭</button></div>
     <div style="padding:10px 14px 0"><input id="opPickSearch" class="sel" style="width:100%" placeholder="搜索接口名 / 路径 / 关键词…"></div>
     <div class="modal-body" id="opPickList" style="overflow:auto"></div>
+  </div>
+</div>
+
+<!-- ═══ 界面 5：版本更新记录 ═══ -->
+<section id="s-news" class="screen news">
+  <div class="page-head">
+    <div>
+      <h2>版本更新记录</h2>
+      <p class="note">每个版本改了什么、修了什么，都记在这里。数据源是仓库根目录的 <code>CHANGELOG.md</code>（Keep a Changelog 格式）——
+        发版时改文件，这页按文件修改时间自动同步，不另存一份。</p>
+    </div>
+    <span style="flex:1"></span>
+    <span class="pill" id="newsVersion" style="background:var(--teal-bg);color:var(--teal)">版本 · —</span>
+    <button class="btn" id="newsRawBtn">查看原文</button>
+  </div>
+  <div class="news-toolbar">
+    <div class="news-filters" id="newsFilters"></div>
+    <span style="flex:1"></span>
+    <input class="news-search" id="newsSearch" type="search" placeholder="搜版本号 / 关键词…" autocomplete="off" aria-label="搜索更新记录">
+  </div>
+  <div class="news-split">
+    <aside class="news-index" id="newsIndex" aria-label="版本索引"></aside>
+    <div class="news-body" id="newsBody"></div>
+  </div>
+</section>
+
+<!-- 更新记录原文弹窗 -->
+<div id="newsRawModal" class="modal hidden">
+  <div class="modal-box" style="width:860px;max-height:82vh;display:flex;flex-direction:column">
+    <div class="modal-head"><b>CHANGELOG.md 原文</b><span style="flex:1"></span>
+      <button class="btn" id="newsRawClose">关闭</button></div>
+    <pre class="news-raw" id="newsRawText">加载中…</pre>
   </div>
 </div>
 

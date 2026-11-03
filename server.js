@@ -17,6 +17,7 @@ const { extractArchive, MAX_ARCHIVE_BYTES } = require('./lib/archive');
 const materials = require('./lib/materials');
 const docs = require('./lib/docs');
 const paramhint = require('./lib/paramhint');
+const changelog = require('./lib/changelog');
 const { createCred, updateCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
 const access = require('./lib/access');
 const intent = require('./lib/intent');
@@ -1341,6 +1342,14 @@ const server = http.createServer(async (req, res) => {
 
     // ── API：注册表 / 告警 / 管理 ──
     if (p === '/api/catalog') return json(res, 200, { ...registry.catalog, etag: registry.etag });
+
+    // ── API：版本更新记录（解析仓库根目录 CHANGELOG.md，按 mtime 缓存）──
+    if (p === '/api/changelog' && req.method === 'GET') return json(res, 200, changelog.load());
+    if (p === '/api/changelog/raw' && req.method === 'GET') {
+      const md = changelog.raw();
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' });
+      return res.end(md);
+    }
 
     // ── API：单个接口的参数提示（节点属性面板用）──
     // 返回 SDK 字段 ∪ 运行期学到的必填/示例，界面据此给「可加参数」候选与必填标记
