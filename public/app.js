@@ -2083,7 +2083,7 @@ function resetRunView() {
   if ($('#eventLog')) $('#eventLog').innerHTML = '<div class="t">—— 事件流（SSE）等待中 ——</div>';
   renderRunList();
 }
-async function deleteRunRecord(id) {
+async function deleteRunListRecord(id) {
   const r = (state.runList || []).find(x => x.id === id);
   const label = r ? `#${r.num} · ${runStatusMeta(r.status).t} · ${_fmtTime(r.startedAt)}` : id;
   if (!confirm(`删除这条运行记录？\n\n${label}\n\n只删历史记录 —— 事件流与运行对比里也会一并消失，不影响流程定义。`)) return;
@@ -2094,7 +2094,7 @@ async function deleteRunRecord(id) {
     toast('已删除运行记录');
   } catch (e) { alert('删除失败：' + e.message); }
 }
-async function clearRunRecords() {
+async function clearRunListRecords() {
   const n = (state.runList || []).length;
   if (!n || !state.flow) return;
   if (!confirm(`清空当前流程的 ${n} 条运行记录？\n\n运行观测的事件流、运行对比都会一并消失，不可恢复。运行中的记录会保留。`)) return;
@@ -2363,7 +2363,7 @@ $('#rlFilter').onclick = e => {
 };
 $('#rlList').addEventListener('click', e => {
   const del = e.target.closest('.rl-del');
-  if (del) { e.stopPropagation(); deleteRunRecord(del.dataset.del); return; }
+  if (del) { e.stopPropagation(); deleteRunListRecord(del.dataset.del); return; }
   const it = e.target.closest('.rl-item');
   if (it && it.dataset.run) loadRun(it.dataset.run);
 });
@@ -2372,7 +2372,7 @@ $('#rlList').addEventListener('keydown', e => {
   const it = e.target.closest('.rl-item');
   if (it) { e.preventDefault(); loadRun(it.dataset.run); }
 });
-$('#rlClear').onclick = clearRunRecords;
+$('#rlClear').onclick = clearRunListRecords;
 
 /* ───────── 界面 2：接口注册表（把 API 接入智能体） ───────── */
 let _srcMode = 'url';
