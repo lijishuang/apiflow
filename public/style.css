@@ -682,6 +682,7 @@ tbody tr:hover{background:var(--bg2)}
 .kv .qchip.miss{border-color:var(--red-line);color:var(--ink);background:var(--bad-bg)}
 
 /* ───────── 版本更新记录（CHANGELOG） ───────── */
+.news{padding:24px 28px}
 .news .page-head code{font:12px/1 var(--font-mono);color:var(--teal);background:var(--teal-bg);border:1px solid var(--teal-line);border-radius:5px;padding:2px 5px}
 .news-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
 .news-filters{display:flex;gap:6px;flex-wrap:wrap}
