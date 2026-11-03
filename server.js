@@ -1298,7 +1298,19 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/runs' && req.method === 'GET') {
       return json(res, 200, store.listRuns(url.searchParams.get('flowId') || null).filter(r => r.trigger !== 'dry-run').slice(0, 30));
     }
-    if ((m = p.match(/^\/api\/runs\/([\w-]+)$/))) {
+    if ((m = p.match(/^\/api\/runs\/([\w-]+)$/)) && req.method === 'DELETE') {
+      const r = store.removeRun(m[1]);
+      if (r.ok) return json(res, 200, { ok: true, deleted: 1 });
+      return json(res, r.reason === 'running' ? 409 : 404, {
+        error: r.reason === 'running' ? '运行中的记录不能删除，等它跑完再删' : 'run not found',
+      });
+    }
+    if (p === '/api/runs' && req.method === 'DELETE') {         // 清空（可带 ?flowId= 只清某个流程）
+      const flowId = url.searchParams.get('flowId') || null;
+      const n = store.clearRuns(flowId);
+      return json(res, 200, { ok: true, deleted: n, flowId });
+    }
+    if ((m = p.match(/^\/api\/runs\/([\w-]+)$/)) && req.method === 'GET') {
       const r = store.getRun(m[1]);
       return r ? json(res, 200, r) : json(res, 404, { error: 'run not found' });
     }

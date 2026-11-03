@@ -94,6 +94,8 @@ const _fmtTime = ts => {
   if (diff < 86400e3) return `${Math.floor(diff / 3600e3)} 小时前`;
   return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
+let _homeRuns = [];        // 首页表格当前渲染的最近运行（删除后重渲染用）
+let _homeRunTotal = 0;     // 运行记录总数（「清空记录」确认文案用）
 async function loadHome() {
   const h = new Date().getHours();
   $('#homeHeroTitle').textContent = `${h < 6 ? '凌晨好' : h < 12 ? '上午好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好'}，这里是 APIFlow 控制台`;
@@ -134,14 +136,20 @@ async function loadHome() {
     : s === 'running' ? '<span class="pill" style="background:var(--blue-bg);color:var(--blue)">运行中</span>'
     : `<span class="pill" style="background:var(--bad-bg);color:var(--bad)">${esc(s)}</span>`;
   const trigTxt = trigLabel;
-  $('#homeRuns').innerHTML = runs.slice(0, 10).map(r => `
+  const shownRuns = runs.slice(0, 10);
+  _homeRuns = shownRuns;
+  _homeRunTotal = runs.length;
+  if ($('#homeRunCount')) $('#homeRunCount').textContent = runs.length ? `最近 ${shownRuns.length} / 共 ${runs.length} 条` : '';
+  if ($('#homeRunClear')) $('#homeRunClear').disabled = !runs.length;
+  $('#homeRuns').innerHTML = shownRuns.map(r => `
     <tr>
       <td><b>${esc(r.flowName || r.flowId)}</b><div class="note">#${r.num} · v${r.version ?? '—'}</div></td>
       <td>${stPill(r.status)}</td>
       <td><span class="note">${esc(trigTxt(r.trigger))}</span></td>
       <td><span class="num" style="font-size:12px">${fmtMs(r.durationMs)}</span></td>
       <td><span class="note">${_fmtTime(r.startedAt)}</span></td>
-    </tr>`).join('') || '<tr><td colspan="5" class="note">还没有运行记录 —— 去搭建器创建流程并运行</td></tr>';
+      <td class="runact">${r.status === 'running' ? '' : `<button class="run-del" data-run="${esc(r.id)}" data-label="${esc(`${r.flowName || r.flowId} #${r.num}`)}" title="删除这条运行记录" aria-label="删除运行记录">✕</button>`}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="note">还没有运行记录 —— 去搭建器创建流程并运行</td></tr>';
 
   /* 告警摘要 */
   $('#homeAlertCount').textContent = alerts.length ? `共 ${alerts.length} 条` : '';
@@ -249,6 +257,38 @@ async function loadHome() {
     <div class="intdiv"></div>
     <div class="introw"><b>AK/SK 凭证</b><span class="note">${credItems.length ? `${credItems.length} 个凭证 · ${bindN} 个单接口绑定` : '未配置 —— 接口页可创建'}</span></div>
     <div class="introw"><b>接口注册表</b><span class="note">${state.catalog ? `${state.catalog.version} · ${(state.catalog.operations || []).length} 个操作可被智能体调用` : '加载中'}</span></div>`;
+}
+
+/* 首页「最近运行」：删单条 / 清空（运行中的记录后端拒绝删除） */
+$('#homeRuns')?.addEventListener('click', e => {
+  const b = e.target.closest('.run-del');
+  if (b) deleteRunRecord(b.dataset.run, b.dataset.label);
+});
+if ($('#homeRunClear')) $('#homeRunClear').onclick = clearRunRecords;
+
+async function deleteRunRecord(id, label) {
+  if (!id) return;
+  if (!confirm(`删除这条运行记录？\n\n${label || id}\n\n只删历史记录 —— 运行观测的事件流与运行对比里也会一并消失，不影响流程定义。`)) return;
+  try {
+    await api('/api/runs/' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('已删除运行记录');
+    await loadHome();
+  } catch (e) {
+    toast(`删除失败：${e.message}`, 'bad');
+    if (e.status === 409) await loadHome();          // 状态过期（已在跑 / 已删）→ 刷新到真实状态
+  }
+}
+
+async function clearRunRecords() {
+  if (!_homeRunTotal) return toast('没有可清空的运行记录');
+  if (!confirm(`清空全部 ${_homeRunTotal} 条运行记录？\n\n运行观测的事件流、运行对比都会一并消失，不可恢复。运行中的记录会保留。`)) return;
+  try {
+    const r = await api('/api/runs', { method: 'DELETE' });
+    toast(r.deleted ? `已清空 ${r.deleted} 条运行记录` : '没有可清空的记录');
+    await loadHome();
+  } catch (e) {
+    toast(`清空失败：${e.message}`, 'bad');
+  }
 }
 
 /* ───────── 界面 1：流程列表（左列表 / 右操作面板，接口变更告警在右侧栏显示） ───────── */

@@ -39,10 +39,13 @@
 
   <div class="home-grid">
     <div class="home-col">
-      <h3 class="sec">最近运行</h3>
+      <h3 class="sec">最近运行
+        <span class="note" id="homeRunCount"></span>
+        <button class="btn tiny" id="homeRunClear" title="清空运行记录（运行中的会保留）">清空记录</button>
+      </h3>
       <table class="optable hometable">
-        <thead><tr><th>流程</th><th>状态</th><th>触发</th><th>耗时</th><th>时间</th></tr></thead>
-        <tbody id="homeRuns"><tr><td colspan="5" class="note">加载中…</td></tr></tbody>
+        <thead><tr><th>流程</th><th>状态</th><th>触发</th><th>耗时</th><th>时间</th><th class="runact"></th></tr></thead>
+        <tbody id="homeRuns"><tr><td colspan="6" class="note">加载中…</td></tr></tbody>
       </table>
       <p class="note" style="margin-top:8px"><a onclick="switchTab('run')">→ 前往运行观测查看事件流与运行对比</a></p>
     </div>
