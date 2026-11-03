@@ -2,6 +2,24 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-11-04
+
+### 新增
+
+- **结果重点展示 + 节点间数据流动可视化**：流程执行 / 搭建器 / 运行观测三处统一突出显示返回结果（结果卡含端点、字段级来源溯源、JSON 高亮与路径跳转）；画布上高亮每个节点的上游依赖与下游消费（依赖线按数据流向着色），节点详情直接看到「谁喂我、我喂谁」。
+- **边数据映射编辑器（P0）**：点连线打开映射弹窗，左侧字段树来自「最近一次成功运行」的上游输出（带类型与示例值、来源标注 `run #编号 · 时间`），右侧逐行配置 `目标字段 ← 来源表达式`；支持自动匹配（精确 → 归一化 → 同义词组，如 `title↔name`、`state↔status`）、值预览、取不到值（死路径）琥珀色告警；目标字段下拉来自下游 body/query/params。`docs/mapping-research.md` 沉淀调研（n8n / Make / MuleSoft / Power Automate / JSONata）与 P1/P2 规划。
+- **接口注册表概览指标卡放大**：指标数字 21px → 36px，四列网格（窄屏两列），一眼看清规模。
+- **Chrome 插件侧栏同步结果卡与依赖表**：sidepanel 复用同一套结果渲染与依赖可视化算法，与 Web 端一致；新增 `GET /api/flows/:id/def`（带缓存）供插件取定义。
+
+### 变更
+
+- 后端新增 `GET /api/flows/:id/node-schema`（映射用节点 schema：上游字段树 + 下游目标字段候选，取自最近一次真实输出）；新增 `lib/schema.js`（`buildTree` / `leavesOf` / `targetsOf` / `preview` / `lastOutput`）。
+- 测试链新增 `test-schema.sh`（42 项：schema 单测 + 真实运行 e2e + 前端纯函数），`npm test` 自动串联。
+
+### 修复
+
+- 结果卡 JSON 高亮转义顺序 bug（先转义再分词导致 key / string 高亮错位）→ 改为先分词再转义，避免 XSS 且高亮正确。
+
 ## [0.3.0] - 2026-11-03
 
 ### 新增

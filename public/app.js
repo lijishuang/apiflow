@@ -1380,8 +1380,24 @@ function renderBuildCanvas() {
 
 /* ── 边数据映射编辑：连线代表数据传递，点线上即可编辑传什么 ──
    edge.map = { 目标字段: 来源表达式 }；引擎把映射结果作为下游的输入（{{input.字段}} 引用），
-   不配置则整包传递上游输出（下游用 {{nodes.上游.output.*}} 引用）。 */
+   不配置则整包传递上游输出（下游用 {{nodes.上游.output.*}} 引用）。
+   面板左侧是上游最近一次运行输出的字段树（带真实取值），点一下就填进右侧映射，
+   右侧目标字段有下拉候选 + 「按同名自动匹配」，每行显示上次实际取到的值。 */
 let edgeEdit = null;   // 当前编辑的边 {from, to}
+
+/* 同义词组：只用于「自动匹配」的最后一级兜底，命中后仍需人工确认保存 */
+const EDGE_SYN = [
+  ['id', 'code', 'key', 'no', 'num', 'number', 'uuid', 'sn', 'sku'],
+  ['name', 'title', 'label', 'subject', 'productname', 'displayname'],
+  ['status', 'state', 'stat'],
+  ['time', 'timestamp', 'ts', 'date', 'datetime', 'createdat', 'updatedat'],
+  ['amount', 'price', 'fee', 'cost', 'money', 'balance'],
+  ['count', 'size', 'qty', 'quantity', 'total'],
+  ['url', 'link', 'href'],
+  ['desc', 'description', 'remark', 'comment', 'note'],
+  ['type', 'kind', 'category', 'class'],
+];
+
 function openEdgeMap(from, to) {
   if (!state.draft) return;
   const edge = (state.draft.edges || []).find(e => e.from === from && e.to === to);
@@ -1390,59 +1406,358 @@ function openEdgeMap(from, to) {
   const upstream = state.draft.nodes.find(n => n.id === from) || {};
   const downstream = state.draft.nodes.find(n => n.id === to) || {};
   $('#edgeTitle').textContent = `传递数据 · ${upstream.name || from} → ${downstream.name || to}${edge.label ? `（${edge.label} 分支）` : ''}`;
+  $('#edgeSrcBadge').style.display = 'none';
+  $('#edgeMapRows').innerHTML = '';
+  $('#emTree').innerHTML = '<div class="em-empty">正在读取上游节点最近一次输出…</div>';
+  $('#emSrcNote').textContent = '';
+  $('#emSearch').value = '';
+  $('#emTargets').innerHTML = '';
+  state.edgeSchema = null; state.edgeCtx = null;
   const hasMap = edge.map && typeof edge.map === 'object' && Object.keys(edge.map).length;
   setEdgeMode(hasMap ? 'map' : 'raw');
-  $('#edgeMapRows').innerHTML = '';
   if (hasMap) for (const [k, v] of Object.entries(edge.map)) addEdgeMapRow(k, v);
-  else addEdgeMapRow('', `{{nodes.${from}.output.`);
+  else addEdgeMapRow('', '');
   $('#edgeModal').classList.remove('hidden');
-  loadEdgeChips(from);   // 异步补「最近运行输出字段」快捷 chips
+  loadEdgeSchema(from, to);   // 字段树与预览上下文（异步）
 }
+
 function setEdgeMode(m) {
   document.querySelectorAll('#edgeMode .btn').forEach(b => b.classList.toggle('on', b.dataset.m === m));
   $('#edgeMode').dataset.m = m;
   const isMap = m === 'map';
-  $('#edgeMapRows').style.display = isMap ? '' : 'none';
-  $('#edgeMapAdd').style.display = isMap ? '' : 'none';
-  $('#edgeChips').style.display = isMap ? '' : 'none';
+  $('#emWrap').style.display = isMap ? '' : 'none';
   $('#edgeHint').innerHTML = isMap
-    ? '只把映射过的字段传给下游。下游节点的模板里用 <code>{{input.字段名}}</code> 引用这里传来的数据；来源可以是 <code>{{nodes.节点ID.output.*}}</code> / <code>{{input.*}}</code> / <code>{{run.num}}</code>。'
+    ? '只把映射过的字段传给下游，下游用 <code>{{input.字段名}}</code> 引用。左边点字段即可填入，也可以直接改表达式（<code>{{nodes.节点ID.output.*}}</code> / <code>{{input.*}}</code> / <code>{{run.num}}</code>）。'
     : '上游输出整包传给下游（默认）。下游模板用 <code>{{nodes.上游节点ID.output.*}}</code> 引用。切到「自定义映射」可以只挑几个字段、改名后再传。';
 }
 document.querySelectorAll('#edgeMode .btn').forEach(b => b.onclick = () => {
   setEdgeMode(b.dataset.m);
   if (b.dataset.m === 'map' && !$('#edgeMapRows').children.length) addEdgeMapRow('', '');
+  if (b.dataset.m === 'map' && !state.edgeSchema) loadEdgeSchema(edgeEdit.from, edgeEdit.to);
 });
+
+/* ── 字段树 ── */
+function edgeTreeHTML(n, depth) {
+  const typeTag = n.type === 'array'
+    ? `<span class="em-type arr">array${n.count != null ? '(' + n.count + ')' : ''}</span>`
+    : `<span class="em-type">${esc(n.type)}</span>`;
+  if (!n.children || !n.children.length) {
+    const sample = n.sample != null
+      ? `<span class="em-sample" title="${esc(n.sample)}">${esc(n.sample)}</span>` : '';
+    return `<div class="em-leaf" data-path="${esc(n.path)}" data-name="${esc(n.label)}" draggable="true"
+      title="点击填入映射，或拖到右侧"><span class="em-key">${esc(n.label)}</span>${typeTag}${sample}<span class="em-plus">＋</span></div>`;
+  }
+  const open = depth < 1;
+  return `<div class="em-branch" data-open="${open ? 1 : 0}">
+    <div class="em-branch-row"><span class="em-caret">▸</span><span class="em-key">${esc(n.label)}</span>${typeTag}${n.count != null ? `<span class="em-cnt">${n.count}</span>` : ''}</div>
+    <div class="em-kids"${open ? '' : ' hidden'}>${n.children.map(c => edgeTreeHTML(c, depth + 1)).join('')}</div>
+  </div>`;
+}
+
+// 搜索：命中自身或任一后代就保留（数组节点的 label 是 [0]，按完整路径也能搜）
+function edgeFilterTree(nodes, q) {
+  const out = [];
+  for (const n of nodes || []) {
+    const selfHit = [n.label, n.path, n.sample].some(x => String(x || '').toLowerCase().includes(q));
+    const kids = n.children ? edgeFilterTree(n.children, q) : [];
+    if (selfHit || kids.length) out.push({ ...n, children: selfHit && n.children ? n.children : kids });
+  }
+  return out;
+}
+
+function renderEdgeTree(q = '') {
+  const data = state.edgeSchema;
+  const box = $('#emTree');
+  if (!data) return;
+  if (!data.fields || !data.fields.length) {
+    box.innerHTML = `<div class="em-empty">${esc(edgeEmptyHint(data))}</div>`;
+    return;
+  }
+  const list = q ? edgeFilterTree(data.fields, q.toLowerCase()) : data.fields;
+  if (!list.length) { box.innerHTML = '<div class="em-empty">没有匹配的字段</div>'; return; }
+  box.innerHTML = list.map(n => edgeTreeHTML(n, 0)).join('');
+  if (q) box.querySelectorAll('.em-kids').forEach(k => { k.hidden = false; });
+}
+
+function edgeEmptyHint(data) {
+  if (data.source === 'none') return '这个节点还没有成功的运行输出 —— 先 Dry-run 一次，字段树就会出现在这里；也可以直接在右侧手写表达式。';
+  return '最近一次输出是空的，没有可挑的字段。';
+}
+
+function edgeNormName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+}
+function edgeSynGroup(name) {
+  const n = edgeNormName(name);
+  return EDGE_SYN.findIndex(g => g.includes(n));
+}
+// 目标字段建议：优先用下游已有字段名（同名 / 归一化同名 / 同义词），否则沿用上游字段名
+function edgeSuggestTarget(leafName) {
+  const targets = (state.edgeSchema && state.edgeSchema.targets) || [];
+  const exact = targets.find(t => t.name === leafName);
+  if (exact) return exact.name;
+  const n = edgeNormName(leafName);
+  const norm = targets.find(t => edgeNormName(t.name) === n);
+  if (norm) return norm.name;
+  const g = edgeSynGroup(leafName);
+  if (g >= 0) {
+    const syn = targets.find(t => edgeSynGroup(t.name) === g);
+    if (syn) return syn.name;
+  }
+  return leafName;
+}
+
+// ── 映射行 ──
 function addEdgeMapRow(k, v) {
   const row = document.createElement('div');
   row.className = 'em-row';
-  row.innerHTML = `<input class="em-k" placeholder="目标字段名" value="${esc(k)}">
+  row.innerHTML = `<input class="em-k" list="emTargets" placeholder="目标字段名" value="${esc(k)}">
     <span class="em-arrow">←</span>
-    <input class="em-v mono" placeholder="来源表达式，如 {{nodes.start.output.id}}">
+    <input class="em-v mono" placeholder="{{nodes.上游.output.字段}}">
+    <span class="em-prev" title="上次运行实际取到的值"></span>
     <button class="em-del" title="删除这行">✕</button>`;
-  row.querySelector('.em-v').value = v;
-  row.querySelector('.em-del').onclick = () => row.remove();
+  row.querySelector('.em-v').value = v || '';
+  row.querySelector('.em-del').onclick = () => { row.remove(); updateEdgeCount(); };
+  row.querySelector('.em-v').addEventListener('input', () => updateRowPreview(row));
+  row.querySelector('.em-k').addEventListener('input', updateEdgeCount);
   $('#edgeMapRows').appendChild(row);
+  updateRowPreview(row);
+  updateEdgeCount();
+  return row;
 }
-$('#edgeMapAdd').onclick = () => { addEdgeMapRow('', ''); const rows = $('#edgeMapRows'); rows.lastChild.querySelector('.em-k').focus(); };
-async function loadEdgeChips(from) {
-  const box = $('#edgeChips');
-  box.innerHTML = '<span class="note">最近一次运行的上游输出字段加载中…</span>';
-  let fields = null;
-  try {
-    const runs = await api('/api/runs?flowId=' + state.draftFlowId);
-    const hit = runs.find(r => r.nodes && r.nodes[from] && r.nodes[from].output != null);
-    if (hit) fields = Object.keys(hit.nodes[from].output || {});
-  } catch { /* 拿不到就不显示 chips */ }
-  if (edgeEdit && edgeEdit.from === from) {
-    box.innerHTML = fields && fields.length
-      ? `<p class="ph-label" style="margin-bottom:6px">从最近输出的字段快速填入</p>` +
-        fields.slice(0, 12).map(f => `<span class="qchip" data-f="${esc(f)}">${esc(f)}</span>`).join(' ')
-      : fields ? '<span class="note">最近一次运行的上游输出是空对象，没有可挑的字段。</span>'
-      : '<span class="note">还没找到这个节点的历史输出 —— 先跑一次（或 Dry-run），这里就能直接挑字段。</span>';
-    box.querySelectorAll('.qchip').forEach(c => c.onclick = () => addEdgeMapRow(c.dataset.f, `{{nodes.${from}.output.${c.dataset.f}}}`));
+
+function evaluateEdgeExpr(expr) {
+  const ctx = state.edgeCtx;
+  const text = String(expr || '').trim();
+  if (!text) return { empty: true };
+  const whole = text.match(/^\{\{([\s\S]+)\}\}$/);
+  if (whole) {
+    const val = lookupPath(ctx, whole[1].trim());
+    return { value: val, found: val !== undefined };
   }
+  if (text.includes('{{')) {
+    let found = true;
+    const value = text.replace(/\{\{([^}]+)\}\}/g, (_, p) => {
+      const v = lookupPath(ctx, p.trim());
+      if (v === undefined) found = false;
+      return v === undefined || v === null ? '' : String(v);
+    });
+    return { value, found };
+  }
+  return { value: text, found: true, literal: true };
 }
+
+// 预览文案：对象/数组给结构摘要，字符串截断，避免一行撑爆
+function edgePreviewText(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return `[${v.length} 项]`;
+  if (typeof v === 'object') {
+    const s = JSON.stringify(v);
+    return s.length > 42 ? s.slice(0, 42) + '…' : s;
+  }
+  const s = String(v).replace(/\s+/g, ' ');
+  return s.length > 42 ? s.slice(0, 42) + '…' : s;
+}
+
+function updateRowPreview(row) {
+  const box = row.querySelector('.em-prev');
+  const expr = row.querySelector('.em-v').value;
+  row.classList.remove('bad-ref');
+  if (!expr.trim()) { box.textContent = '—'; box.className = 'em-prev dim'; box.title = ''; return; }
+  if (!state.edgeCtx) {
+    box.textContent = '—';
+    box.className = 'em-prev dim';
+    box.title = '这个节点还没有成功的运行记录，跑一次后这里会显示实际取值';
+    return;
+  }
+  const r = evaluateEdgeExpr(expr);
+  if (r.empty) { box.textContent = '—'; box.className = 'em-prev dim'; return; }
+  if (!r.found) {
+    row.classList.add('bad-ref');
+    box.textContent = '未取到';
+    box.className = 'em-prev bad';
+    box.title = '上次运行里这段路径没有值：检查字段名大小写、数组下标，或先跑一次';
+    return;
+  }
+  box.textContent = edgePreviewText(r.value);
+  box.className = 'em-prev' + (r.value === null ? ' dim' : '');
+  box.title = r.literal ? '字面量（不引用上游数据）' : '上次运行实际取到的值';
+}
+
+function refreshPreviews() {
+  document.querySelectorAll('#edgeMapRows .em-row').forEach(updateRowPreview);
+}
+
+function updateEdgeCount() {
+  const rows = [...document.querySelectorAll('#edgeMapRows .em-row')];
+  const n = rows.filter(r => r.querySelector('.em-k').value.trim()).length;
+  $('#emCount').textContent = n ? `已映射 ${n} 个字段` : '还没有映射';
+}
+
+// 点字段 → 填入：复用空行，否则新增一行；目标字段尽量取下游同名候选
+function insertEdgeRef(path, name) {
+  if (!edgeEdit) return;
+  const src = `{{nodes.${edgeEdit.from}.output.${path}}}`;
+  const rows = [...document.querySelectorAll('#edgeMapRows .em-row')];
+  const empty = rows.find(r => !r.querySelector('.em-k').value.trim() && !r.querySelector('.em-v').value.trim());
+  const target = edgeSuggestTarget(name);
+  let row;
+  if (empty) {
+    empty.querySelector('.em-k').value = target;
+    empty.querySelector('.em-v').value = src;
+    updateRowPreview(empty);
+    row = empty;
+  } else {
+    row = addEdgeMapRow(target, src);
+    row.scrollIntoView({ block: 'nearest' });
+  }
+  updateEdgeCount();
+  row.querySelector('.em-v').classList.add('em-flash');
+  setTimeout(() => row.querySelector('.em-v').classList.remove('em-flash'), 500);
+}
+
+/* ── 拉字段树 + 预览上下文 ── */
+async function loadEdgeSchema(from, to) {
+  let data = null;
+  try {
+    data = await api(`/api/flows/${state.draftFlowId}/node-schema?nodeId=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  } catch { /* 拉不到就让用户手写表达式 */ }
+  if (!edgeEdit || edgeEdit.from !== from || edgeEdit.to !== to) return;   // 弹窗已切到别的边
+  state.edgeSchema = data || null;
+  if (!data) {
+    $('#emTree').innerHTML = '<div class="em-empty">字段读取失败，可以直接在右侧手写表达式。</div>';
+    return;
+  }
+  // 目标字段下拉候选
+  $('#emTargets').innerHTML = (data.targets || [])
+    .map(t => `<option value="${esc(t.name)}">${esc(t.hint || '下游字段')}${t.required ? ' · 必填' : ''}</option>`).join('');
+  // 来源标记
+  const badge = $('#edgeSrcBadge');
+  if (data.source === 'run') {
+    const at = data.at ? new Date(data.at) : null;
+    const hhmm = at ? `${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}` : '';
+    badge.textContent = `字段来自 run #${data.num ?? ''} ${hhmm}`;
+    badge.style.cssText = 'display:inline-block;background:var(--ok-bg);color:var(--ok)';
+  } else if (data.source === 'sample') {
+    badge.textContent = '字段来自流程输入示例';
+    badge.style.cssText = 'display:inline-block;background:var(--blue-bg);color:var(--blue)';
+  } else {
+    badge.textContent = '暂无运行数据';
+    badge.style.cssText = 'display:inline-block;background:var(--amber-bg);color:var(--amber)';
+  }
+  $('#emSrcNote').innerHTML = data.source === 'run'
+    ? `取自节点 <b>${esc(from)}</b> 最近一次成功输出${data.truncated ? ' · 字段较多，已截断' : ''}`
+    : (data.source === 'sample' ? '取自流程输入示例（还没跑过）' : '还没有可用输出');
+  renderEdgeTree($('#emSearch').value.trim());
+
+  // 预览上下文：需要那次运行的完整节点输出，才能算 {{nodes.X.output.*}} 和 {{input.*}}
+  if (data.source === 'run' && data.runId) {
+    try {
+      const run = await api('/api/runs/' + data.runId);
+      if (!edgeEdit || edgeEdit.from !== from || edgeEdit.to !== to) return;
+      state.edgeCtx = {
+        input: run.input || {},
+        run: { id: run.id, num: run.num },
+        nodes: Object.fromEntries(Object.entries(run.nodes || {}).map(([k, v]) => [k, { output: v.output, cond: v.cond }])),
+      };
+    } catch { state.edgeCtx = null; }
+  }
+  refreshPreviews();
+}
+
+/* ── 按同名自动匹配 ── */
+// 纯匹配逻辑（可单测）：① 完全同名 → ② 归一化同名 → ③ 同义词组；浅层字段优先
+function matchEdgeFields(leaves, targets) {
+  const depthOf = p => String(p).split('.').length;
+  const sorted = leaves.slice().sort((a, b) => depthOf(a.path) - depthOf(b.path));
+  const used = new Set();
+  const picked = [];
+  const take = (t, leaf) => { used.add(leaf.path); picked.push({ target: t.name, path: leaf.path }); };
+  if (!targets.length) return picked;
+
+  for (const t of targets) {
+    const hit = sorted.find(l => !used.has(l.path) && l.name === t.name);
+    if (hit) take(t, hit);
+  }
+  for (const t of targets) {
+    if (picked.some(p => p.target === t.name)) continue;
+    const n = edgeNormName(t.name);
+    if (!n) continue;
+    const hit = sorted.find(l => !used.has(l.path) && edgeNormName(l.name) === n);
+    if (hit) take(t, hit);
+  }
+  for (const t of targets) {
+    if (picked.some(p => p.target === t.name)) continue;
+    const g = edgeSynGroup(t.name);
+    if (g < 0) continue;
+    const hit = sorted.find(l => !used.has(l.path) && edgeSynGroup(l.name) === g);
+    if (hit) take(t, hit);
+  }
+  return picked;
+}
+
+function autoMatchEdgeRows() {
+  const data = state.edgeSchema;
+  if (!data) { toast('字段还没加载完，稍等一下'); return; }
+  const leaves = data.leaves || [];
+  if (!leaves.length) { toast('上游没有可用的字段'); return; }
+  const depthOf = p => String(p).split('.').length;
+  const targets = (data.targets && data.targets.length)
+    ? data.targets
+    : leaves.filter(l => depthOf(l.path) === 1).slice(0, 12).map(l => ({ name: l.name, hint: '上游字段' }));
+
+  const picked = matchEdgeFields(leaves, targets);
+  if (!picked.length) { toast('没有同名或近义字段，手动挑几个吧'); return; }
+  $('#edgeMapRows').innerHTML = '';
+  for (const p of picked) addEdgeMapRow(p.target, `{{nodes.${edgeEdit.from}.output.${p.path}}}`);
+  refreshPreviews();
+  updateEdgeCount();
+  toast(`已按同名匹配 ${picked.length} 个字段，核对「上次取值」后保存`);
+}
+
+$('#edgeAutoMatch').onclick = autoMatchEdgeRows;
+$('#edgeMapAdd').onclick = () => {
+  const row = addEdgeMapRow('', '');
+  row.querySelector('.em-k').focus();
+};
+$('#emSearch').addEventListener('input', () => renderEdgeTree($('#emSearch').value.trim()));
+$('#emTree').addEventListener('click', ev => {
+  const leaf = ev.target.closest('.em-leaf');
+  if (leaf) { insertEdgeRef(leaf.dataset.path, leaf.dataset.name); return; }
+  const head = ev.target.closest('.em-branch-row');
+  if (head) {
+    const branch = head.parentElement;
+    const kids = branch.querySelector('.em-kids');
+    kids.hidden = !kids.hidden;
+    branch.dataset.open = kids.hidden ? '0' : '1';
+  }
+});
+// 拖拽：字段拖到右侧映射区，落到哪一行就填哪一行的来源；空白处则新增一行
+$('#emTree').addEventListener('dragstart', ev => {
+  const leaf = ev.target.closest('.em-leaf');
+  if (!leaf) return;
+  ev.dataTransfer.setData('text/plain', JSON.stringify({ path: leaf.dataset.path, name: leaf.dataset.name }));
+  ev.dataTransfer.effectAllowed = 'copy';
+});
+$('#emWrap').addEventListener('dragover', ev => { if (ev.target.closest('.em-main')) ev.preventDefault(); });
+$('#emWrap').addEventListener('drop', ev => {
+  const main = ev.target.closest('.em-main');
+  if (!main) return;
+  ev.preventDefault();
+  let payload = null;
+  try { payload = JSON.parse(ev.dataTransfer.getData('text/plain')); } catch { return; }
+  if (!payload || !payload.path || !edgeEdit) return;
+  const src = `{{nodes.${edgeEdit.from}.output.${payload.path}}}`;
+  const rowEl = ev.target.closest('.em-row');
+  if (rowEl) {
+    rowEl.querySelector('.em-v').value = src;
+    if (!rowEl.querySelector('.em-k').value.trim()) rowEl.querySelector('.em-k').value = edgeSuggestTarget(payload.name);
+    updateRowPreview(rowEl); updateEdgeCount();
+  } else {
+    insertEdgeRef(payload.path, payload.name);
+  }
+});
+
 $('#edgeSave').onclick = () => {
   if (!edgeEdit) return;
   const edge = (state.draft.edges || []).find(e => e.from === edgeEdit.from && e.to === edgeEdit.to);

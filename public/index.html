@@ -356,17 +356,33 @@
 
 <!-- 边数据映射编辑（连线代表数据传递，线上可编辑传什么） -->
 <div class="modal hidden" id="edgeModal">
-  <div class="modal-box" style="width:600px;max-height:80vh;display:flex;flex-direction:column">
-    <div class="modal-head"><b id="edgeTitle">编辑传递数据</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('edgeModal').classList.add('hidden')">关闭</button></div>
-    <div class="modal-body" style="overflow:auto">
+  <div class="modal-box" style="width:min(980px,95vw);max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-head"><b id="edgeTitle">编辑传递数据</b><span class="pill" id="edgeSrcBadge" style="display:none"></span><span style="flex:1"></span><button class="btn" onclick="document.getElementById('edgeModal').classList.add('hidden')">关闭</button></div>
+    <div class="modal-body em-body">
       <div id="edgeMode" class="edge-mode">
         <button class="btn mini on" data-m="raw">整包传递</button>
         <button class="btn mini" data-m="map">自定义映射</button>
       </div>
       <p class="note" id="edgeHint" style="margin:8px 0 0"></p>
-      <div id="edgeMapRows" style="margin-top:10px"></div>
-      <button class="btn wide dashed" id="edgeMapAdd" style="margin-top:6px">＋添加字段</button>
-      <div id="edgeChips" style="margin-top:10px"></div>
+      <div class="em-wrap" id="emWrap">
+        <aside class="em-side">
+          <div class="em-side-head"><input id="emSearch" placeholder="搜索字段名 / 取值…"></div>
+          <div class="em-tree" id="emTree"></div>
+          <div class="em-srcnote" id="emSrcNote"></div>
+        </aside>
+        <section class="em-main">
+          <div class="em-toolbar">
+            <button class="btn mini" id="edgeAutoMatch">⚡ 按同名自动匹配</button>
+            <span class="note" id="emCount"></span>
+            <span style="flex:1"></span>
+            <span class="note">点左侧字段即可填入</span>
+          </div>
+          <div class="em-head"><span>目标字段</span><span></span><span>来源表达式</span><span>上次取值</span><span></span></div>
+          <div id="edgeMapRows"></div>
+          <button class="btn wide dashed" id="edgeMapAdd" style="margin-top:8px">＋ 添加字段</button>
+          <datalist id="emTargets"></datalist>
+        </section>
+      </div>
     </div>
     <div class="modal-foot" style="padding:0 18px 14px">
       <button class="btn" id="edgeCancel">取消</button>

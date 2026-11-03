@@ -17,6 +17,7 @@ const { extractArchive, MAX_ARCHIVE_BYTES } = require('./lib/archive');
 const materials = require('./lib/materials');
 const docs = require('./lib/docs');
 const paramhint = require('./lib/paramhint');
+const schema = require('./lib/schema');
 const changelog = require('./lib/changelog');
 const { createCred, updateCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
 const access = require('./lib/access');
@@ -1150,6 +1151,23 @@ const server = http.createServer(async (req, res) => {
         ? ((f.draft && f.draft.def) || (f.published && f.published.def) || null)
         : ((f.published && f.published.def) || (f.draft && f.draft.def) || null);
       return json(res, 200, { def, version: f.published ? f.published.version : 0 });
+    }
+    // ── 节点数据结构：映射面板的字段树 + 目标字段候选（字段取自最近一次真实输出）──
+    if ((m = p.match(/^\/api\/flows\/([\w-]+)\/node-schema$/)) && req.method === 'GET') {
+      const f = store.getFlow(m[1]);
+      if (!f) return json(res, 404, { error: 'flow not found' });
+      const def = (f.draft && f.draft.def) || (f.published && f.published.def);
+      if (!def) return json(res, 404, { error: '流程还没有定义' });
+      const nodeId = url.searchParams.get('nodeId') || '';
+      if (!nodeId) return json(res, 400, { error: '缺少 nodeId' });
+      const out = schema.nodeSchema({
+        def, nodeId,
+        toId: url.searchParams.get('to') || '',
+        runs: store.listRuns(def.id || m[1]),
+        ops: allOperations(),
+      });
+      if (out.error) return json(res, 404, out);
+      return json(res, 200, out);
     }
     // ── 并行批跑：一次提交多个流程，按并发度同时执行 ──
     if (p === '/api/flows/batch-run' && req.method === 'POST') {

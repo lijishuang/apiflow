@@ -778,16 +778,51 @@ svg path.edge-tmp{stroke:var(--blue)}
 .edge-mode{display:flex;gap:6px}
 .edge-mode .btn{opacity:.55}
 .edge-mode .btn.on{opacity:1;border-color:var(--ok);color:var(--ok)}
-.em-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.em-row input{flex:1;min-width:0;background:var(--bg0);border:1px solid var(--line-soft);border-radius:7px;color:var(--ink);font-size:12.5px;padding:6px 8px}
-.em-row input.mono{font-family:var(--font-mono);font-size:11.5px}
-.em-row input:focus{outline:none;border-color:var(--ok)}
-.em-row .em-k{flex:0 0 34%}
-.em-arrow{color:var(--muted);flex:none}
-.em-row .em-del{flex:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:4px}
+
+/* 映射面板：左侧字段树 + 右侧映射表 */
+.em-body{padding-top:10px}
+.em-wrap{display:grid;grid-template-columns:268px minmax(0,1fr);gap:12px;margin-top:10px}
+.em-side{display:flex;flex-direction:column;border:1px solid var(--line-soft);border-radius:10px;background:var(--bg2);overflow:hidden;max-height:52vh;min-height:300px}
+.em-side-head{padding:8px;border-bottom:1px solid var(--line-soft);flex:none}
+.em-side-head input{width:100%;box-sizing:border-box;background:var(--bg0);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:12.5px;color:var(--ink)}
+.em-side-head input:focus{outline:none;border-color:var(--ok)}
+.em-tree{flex:1;overflow:auto;padding:6px 5px;font:12.5px/1.5 var(--font-mono)}
+.em-empty{padding:16px 12px;font-size:12.5px;line-height:1.65;color:var(--muted)}
+.em-branch-row{display:flex;align-items:center;gap:5px;padding:3px 5px;border-radius:6px;cursor:pointer;user-select:none}
+.em-branch-row:hover{background:var(--bg3)}
+.em-caret{display:inline-block;width:9px;flex:none;color:var(--faint);font-size:9px;transition:transform .12s}
+.em-branch[data-open="1"] > .em-branch-row .em-caret{transform:rotate(90deg)}
+.em-kids{margin-left:11px;border-left:1px dashed var(--line);padding-left:3px}
+.em-leaf{display:flex;align-items:center;gap:5px;padding:3px 5px;border-radius:6px;cursor:pointer;user-select:none}
+.em-leaf:hover{background:var(--teal-bg)}
+.em-leaf .em-plus{opacity:0;color:var(--teal);font-weight:700;flex:none;transition:opacity .12s}
+.em-leaf:hover .em-plus{opacity:1}
+.em-key{color:var(--ink);white-space:nowrap;flex:none;max-width:132px;overflow:hidden;text-overflow:ellipsis}
+.em-type{font-size:10px;color:var(--faint);background:var(--bg3);border-radius:4px;padding:0 4px;flex:none}
+.em-type.arr{color:var(--purple);background:var(--purple-bg)}
+.em-cnt{font-size:10px;color:var(--faint);flex:none}
+.em-sample{color:var(--muted);font-size:11px;flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.em-srcnote{padding:7px 10px;border-top:1px solid var(--line-soft);font-size:11.5px;line-height:1.5;color:var(--muted);flex:none}
+.em-main{display:flex;flex-direction:column;min-width:0}
+.em-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.em-head,.em-row{display:grid;grid-template-columns:118px 12px minmax(0,1fr) 104px 20px;gap:6px;align-items:center}
+.em-head{font-size:11px;color:var(--faint);padding:0 2px 5px;letter-spacing:.02em}
+.em-row{padding:4px 2px;border-bottom:1px dashed var(--line-soft)}
+.em-row input{width:100%;min-width:0;box-sizing:border-box;background:var(--bg0);border:1px solid var(--line-soft);border-radius:7px;color:var(--ink);font-size:12.5px;padding:5px 7px}
+.em-row .em-k{font-size:12.5px}
+.em-row input.mono,.em-row .em-v{font-family:var(--font-mono);font-size:11px;color:var(--blue)}
+.em-row input:focus{outline:none;border-color:var(--ok);box-shadow:0 0 0 2px rgba(47,191,143,.12)}
+.em-arrow{color:var(--faint);text-align:center;font-size:11px}
+.em-prev{font-size:11px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono)}
+.em-prev.dim{color:var(--faint)}
+.em-prev.bad{color:var(--amber)}
+.em-row.bad-ref .em-v{border-color:var(--amber)}
+.em-row .em-del{background:none;border:none;color:var(--faint);cursor:pointer;padding:2px;font-size:11px;flex:none}
 .em-row .em-del:hover{color:var(--bad)}
-#edgeChips .qchip{margin:0 6px 6px 0}
-#edgeChips .qchip:hover{border-color:var(--ok);color:var(--ok)}
+.em-flash{animation:em-flash .5s ease-out}
+@keyframes em-flash{from{background:var(--teal-bg);border-color:var(--teal)}}
+#emTree::-webkit-scrollbar,.em-side ::-webkit-scrollbar{width:8px}
+@media(max-width:880px){.em-wrap{grid-template-columns:1fr}.em-side{max-height:30vh;min-height:160px}}
 
 /* ── 边中点「重接」按钮（与 ✕ 删除并排） ── */
 .edge-rw{position:absolute;z-index:5;width:16px;height:16px;border-radius:50%;background:var(--bg2);border:1px solid var(--line-soft);color:var(--muted);font-size:10px;line-height:14px;text-align:center;cursor:pointer;user-select:none}

@@ -32,9 +32,9 @@ import sys,json
 d=json.load(sys.stdin)
 assert len(d['releases'])>=1, d['releases']
 r0=d['releases'][0]
-assert r0['version']=='0.3.0' and r0['date']=='2026-11-03' and r0['unreleased'] is False, r0
-assert d['latestVersion']=='0.3.0' and d['latestDate']=='2026-11-03', d
-assert d['currentVersion']=='0.3.0', d
+assert r0['version']=='0.4.0' and r0['date']=='2026-11-04' and r0['unreleased'] is False, r0
+assert d['latestVersion']=='0.4.0' and d['latestDate']=='2026-11-04', d
+assert d['currentVersion']=='0.4.0', d
 assert d['stats']['items']==sum(r['itemCount'] for r in d['releases']), d['stats']
 " ; chk "版本/日期/未发布标记/条目计数自洽" $?
 
