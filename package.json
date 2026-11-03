@@ -1,6 +1,6 @@
 {
   "name": "apiflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "自然语言构建可复用接口流程的平台：LLM 只参与搭建，运行时是纯确定性引擎（可重放、可审计、零 token）。",
   "main": "server.js",
   "engines": {
