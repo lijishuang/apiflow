@@ -228,12 +228,25 @@
     <span class="pill" id="runPill">尚未运行</span>
     <span class="note" id="runMeta"></span>
     <span style="flex:1"></span>
-    <label class="note">运行历史 <select id="runHist" class="sel"><option>—</option></select></label>
     <label class="note">对比 <select id="cmpA" class="sel"><option>—</option></select><select id="cmpB" class="sel"><option>—</option></select></label>
     <button class="btn" id="btnCmp">运行对比</button>
     <button class="btn primary" id="btnRun">▶ 运行</button>
   </div>
   <div class="runner-main">
+    <aside class="runlist" id="runList" aria-label="运行记录">
+      <div class="rl-head">
+        <b>运行记录</b>
+        <span class="note" id="rlCount"></span>
+        <span style="flex:1"></span>
+        <button class="rl-mini" id="rlClear" title="清空该流程的运行记录（运行中的保留）">清空</button>
+      </div>
+      <div class="rl-filter" id="rlFilter">
+        <button class="rfchip on" data-f="">全部</button>
+        <button class="rfchip" data-f="success">成功</button>
+        <button class="rfchip" data-f="failed">失败</button>
+      </div>
+      <div class="rl-list" id="rlList"><div class="note" style="padding:10px 12px">选择上方流程查看运行记录</div></div>
+    </aside>
     <div class="canvas-wrap"><div class="canvas" id="runCanvas"></div></div>
     <aside class="drawer" id="runDrawer"><span class="note">点击节点查看请求 / 响应 / 重试记录</span></aside>
   </div>

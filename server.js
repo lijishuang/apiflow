@@ -470,6 +470,22 @@ function json(res, code, data) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
   res.end(body);
 }
+// 运行记录摘要：列表只需要「哪一次、成没成、多久、卡在哪个节点」，不搬运 events / nodes 全量
+function runListItem(r) {
+  const recs = Object.values(r.nodes || {});
+  const nodeOk = recs.filter(n => n.status === 'done' || n.status === 'reused').length;
+  const nodeFail = recs.filter(n => n.status === 'failed').length;
+  const failedNode = recs.find(n => n.error) || null;
+  const err = r.error || (failedNode && failedNode.error) || null;
+  return {
+    id: r.id, num: r.num, flowId: r.flowId, flowName: r.flowName, version: r.version,
+    trigger: r.trigger, actor: r.actor || null, status: r.status,
+    startedAt: r.startedAt, durationMs: r.durationMs == null ? null : r.durationMs,
+    input: r.input || {}, nodeTotal: recs.length, nodeOk, nodeFail,
+    error: err ? String(err).slice(0, 300) : null,
+    replayFrom: r.replayFrom || null,
+  };
+}
 async function readBody(req) {
   // 认证阶段可能已经把请求体读出来了（AK/SK 要算 body 哈希），这里直接复用，避免流被消费两次
   if (req._raw != null) {
@@ -1306,7 +1322,11 @@ const server = http.createServer(async (req, res) => {
 
     // ── API：运行 ──
     if (p === '/api/runs' && req.method === 'GET') {
-      return json(res, 200, store.listRuns(url.searchParams.get('flowId') || null).filter(r => r.trigger !== 'dry-run').slice(0, 30));
+      const flowId = url.searchParams.get('flowId') || null;
+      const list = store.listRuns(flowId).filter(r => r.trigger !== 'dry-run');
+      // brief=1：运行观测左侧「运行记录」列表用，只回摘要（不含 events / nodes 全量）
+      if (url.searchParams.get('brief') === '1') return json(res, 200, list.slice(0, 50).map(runListItem));
+      return json(res, 200, list.slice(0, 30));
     }
     if ((m = p.match(/^\/api\/runs\/([\w-]+)$/)) && req.method === 'DELETE') {
       const r = store.removeRun(m[1]);

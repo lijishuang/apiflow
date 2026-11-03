@@ -82,7 +82,7 @@ POST /api/sources/batch-delete        {ids}               批量卸载接口来�
 POST /api/ops/batch-delete            {ids,preview}       批量删除注册表接口（preview=true 只出报告；内置→隐藏可恢复，来源接口→移除）
 POST /api/ops/restore                 {ids?}              恢复被隐藏的内置接口（缺省全部恢复）
 POST /webhook/:flowId                                    Webhook 触发
-GET  /api/runs?flowId=  /api/runs/:id                    运行历史 / 详情
+GET  /api/runs?flowId=&brief=1  /api/runs/:id        运行历史 / 详情（brief=1 返回轻量摘要，供运行观测「运行记录」列表）
 POST /api/runs/:id/replay            {fromNode}          从节点重放（复用上游产物）
 GET  /api/runs/:a/diff/:b                                运行对比（逐节点 diff）
 GET  /api/events                                         SSE 实时事件流
@@ -248,13 +248,15 @@ bash test-materials.sh  # 9 项 SDK 资料库回归（符号抽取/中英文检�
 bash test-extension.sh  # 65 项 Chrome 插件接入回归（默认开放/四类意图/执行闸门/令牌/AK-SK/强制认证/降级自愈）
 bash test-params.sh     # 10 项参数提示回归（200 业务错误信封/缺参提取/参数学习/自动带参）
 bash test-runs.sh       # 12 项运行记录删除回归（单条删/清空/运行中保护/落盘）
+bash test-runlist.sh    # 7 项运行记录列表回归（brief 摘要字段/失败摘要/全量兼容/删除联动）
 bash test-news.sh       # 11 项更新记录页回归（CHANGELOG 解析/内联渲染与 XSS 转义/分组排序/缓存）
 node test-canvas-edit.js # 画布手动编辑 UI 回归（53 项，含「结束」终点拖动、结束断言、流程切换；需 playwright + 本机 Chrome）
+node test-runlist-ui.js # 运行观测「运行记录」列表 UI 回归（18 项：渲染/自动选中/切换/筛选/实时刷新/删除/清空）
 node test-ui.js         # 前端三界面自动化（需 playwright；NODE_PATH 指向 node_modules）
 node test-sources-ui.js # 前端「接口接入」链路自动化（空态→接入→注册表→搭建器可用）
 ```
 
-最近一轮：**自然语言 20 + 帮助手册 21 + 全链路 e2e 19 + 参数提示 10 + 运行记录删除 12 + 更新记录页 11 + Chrome 插件 65 + 认证 29 + 注册表批量删除 16 + pip 11 + SDK 导入 21 + 压缩包 12 + 调试 26 + 资料库 9 + 接入 9 + 画布编辑 53 全部通过（共 344 项；并行批跑需 ≥4 条已发布流程另测）。测试套件已全部「种子自保障」：不依赖平台里的用户数据，自建夹具、退出自动清理还原。**
+最近一轮：**自然语言 20 + 帮助手册 21 + 全链路 e2e 19 + 认证 29 + 注册表批量删除 16 + SDK 导入 21 + 资料库 9 + pip 11 + 压缩包 12 + 调试 26 + 接入 9 + 并行批跑 26 + 参数提示 10 + 运行记录删除 12 + 运行记录列表 7 + 运行记录列表 UI 18 + 更新记录页 11 + 画布编辑 53 + Chrome 插件 64 全部通过（共 394 项，0 失败）。测试套件已全部「种子自保障」：不依赖平台里的用户数据，自建夹具、退出自动清理还原；对「内置接口隐藏态」这类用户环境差异只记录、按原样还原，不替用户做决定。**
 
 ## 设计对齐说明
 

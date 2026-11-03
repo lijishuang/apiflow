@@ -4,6 +4,7 @@ const state = {
   flows: [], flow: null,        // 当前流程（published def）
   draft: null, draftFlowId: null, selNode: null,
   run: null,                    // 运行观测当前 run
+  runList: [], runFilter: '',   // 运行观测左栏：该流程的运行记录摘要 + 状态筛选
   sse: null, canvasMode: null,
   catalog: null, sources: [],   // 工具注册表 + 外部接口来源
   docs: [], docStats: { docs: 0, chunks: 0, chars: 0 },   // 帮助手册（搭建器的解析依据）
@@ -1804,14 +1805,7 @@ async function refreshRunFlows() {
 }
 async function selectRunFlow(flowId) {
   state.flow = flowId;
-  const runs = await api('/api/runs?flowId=' + flowId);
-  const opts = runs.map(r => `<option value="${r.id}">#${r.num} ${r.status} ${trigLabel(r.trigger)} ${new Date(r.startedAt).toLocaleTimeString()}</option>`).join('');
-  $('#runHist').innerHTML = '<option value="">— 选择历史 run —</option>' + opts;
-  $('#cmpA').innerHTML = '<option value="">A</option>' + opts;
-  $('#cmpB').innerHTML = '<option value="">B</option>' + opts;
-  $('#runHist').onchange = () => { if ($('#runHist').value) loadRun($('#runHist').value); };
   // 画布渲染已发布定义
-  const runsFull = await api('/api/runs?flowId=' + flowId);
   const def = await getDef(flowId);
   state.def = def;
   state.liveRun = null;
@@ -1819,6 +1813,10 @@ async function selectRunFlow(flowId) {
   const rendered = renderCanvas($('#runCanvas'), def, 'live');
   state.edgeEls = rendered.edgeEls;
   $('#runDrawer').innerHTML = '<span class="note">点击节点查看请求 / 响应 / 重试记录</span>';
+  state.run = null;
+  state.runList = [];                       // 切流程：先清掉上一个流程的列表，避免闪现旧记录
+  resetRunView();
+  await refreshRunList({ auto: true });     // 进页面默认展开最近一次运行的观测记录
 }
 async function getDef(flowId) {
   const f = state.flows.find(x => x.id === flowId);
@@ -1826,6 +1824,107 @@ async function getDef(flowId) {
   // 从运行记录或重新载入：这里直接通过 publish 接口不可读，改从 run 恢复；最简单：dry-run 会存 draft —— 直接保存 def 副本在 flows API
   const res = await api('/api/flows/' + flowId + '/def');
   return res.def;
+}
+/* ── 运行记录列表（左栏）── 只取摘要，点一条就载入那一次的观测 ── */
+let _rlSeq = 0, _rlTimer = null;
+function scheduleRunListRefresh() {          // SSE 批量跑时事件密集，合并成一次拉取
+  if (!state.flow || _rlTimer) return;
+  _rlTimer = setTimeout(() => { _rlTimer = null; refreshRunList({ auto: false }); }, 700);
+}
+async function refreshRunList(opts = {}) {
+  const flowId = state.flow;
+  if (!flowId || !$('#rlList')) return;
+  const seq = ++_rlSeq;
+  let runs = [];
+  try { runs = await api('/api/runs?brief=1&flowId=' + encodeURIComponent(flowId)); } catch { runs = []; }
+  if (seq !== _rlSeq || state.flow !== flowId) return;    // 快速切流程：丢弃过期响应
+  state.runList = runs;
+  const opts2 = runs.map(r => `<option value="${r.id}">#${r.num} ${runStatusMeta(r.status).t} ${trigLabel(r.trigger)} ${_fmtTime(r.startedAt)}</option>`).join('');
+  const keepA = $('#cmpA').value, keepB = $('#cmpB').value;
+  $('#cmpA').innerHTML = '<option value="">A</option>' + opts2;
+  $('#cmpB').innerHTML = '<option value="">B</option>' + opts2;
+  if (keepA) $('#cmpA').value = keepA;
+  if (keepB) $('#cmpB').value = keepB;
+  renderRunList();
+  const hasSel = state.run && runs.some(r => r.id === state.run.id);
+  if (opts.auto && !hasSel && runs.length) await loadRun(runs[0].id);
+}
+function runStatusMeta(s) {
+  if (s === 'success') return { t: '成功', c: 'var(--ok)', bg: 'var(--ok-bg)' };
+  if (s === 'running') return { t: '运行中', c: 'var(--blue)', bg: 'var(--blue-bg)' };
+  if (s === 'failed') return { t: '失败', c: 'var(--bad)', bg: 'var(--bad-bg)' };
+  return { t: s || '—', c: 'var(--muted)', bg: 'var(--bg3)' };
+}
+function renderRunList() {
+  const box = $('#rlList');
+  if (!box) return;
+  const all = state.runList || [];
+  const f = state.runFilter || '';
+  const list = !f ? all : f === 'failed'
+    ? all.filter(r => r.status !== 'success' && r.status !== 'running')
+    : all.filter(r => r.status === f);
+  const cnt = $('#rlCount');
+  if (cnt) cnt.textContent = all.length ? `${list.length}/${all.length} 条` : '';
+  const clr = $('#rlClear');
+  if (clr) clr.disabled = !all.length;
+  document.querySelectorAll('#rlFilter .rfchip').forEach(b => b.classList.toggle('on', (b.dataset.f || '') === f));
+  if (!all.length) {
+    box.innerHTML = '<div class="rl-empty">该流程还没有运行记录<br><span class="note">点右上「▶ 运行」触发一次</span></div>';
+    return;
+  }
+  if (!list.length) {
+    box.innerHTML = `<div class="rl-empty">没有「${f === 'success' ? '成功' : '失败'}」的运行记录</div>`;
+    return;
+  }
+  box.innerHTML = list.map(r => {
+    const m = runStatusMeta(r.status);
+    const on = state.run && state.run.id === r.id ? ' on' : '';
+    const dur = r.status === 'running' ? '运行中…' : fmtDur(r.durationMs);
+    const nodes = r.nodeTotal ? `${r.nodeOk}/${r.nodeTotal}` : '—';
+    const err = r.status !== 'success' && r.status !== 'running' && r.error
+      ? `<div class="rl-err" title="${esc(r.error)}">${esc(r.error)}</div>` : '';
+    return `<div class="rl-item${on}" data-run="${esc(r.id)}" role="button" tabindex="0" title="查看 #${r.num} 的观测记录">
+      <span class="rl-dot${r.status === 'running' ? ' rl-live' : ''}" style="background:${m.c}"></span>
+      <div class="rl-body">
+        <div class="rl-row"><b>#${r.num}</b><span class="rl-st" style="color:${m.c};background:${m.bg}">${m.t}</span><span class="rl-trig">${esc(trigLabel(r.trigger))}</span><span style="flex:1"></span><span class="rl-dur">${esc(dur)}</span></div>
+        <div class="rl-row rl-sub"><span>${_fmtTime(r.startedAt)} · v${r.version ?? '—'}${r.actor ? ' · ' + esc(r.actor) : ''}</span><span style="flex:1"></span><span>${nodes} 节点</span></div>
+        ${err}
+      </div>
+      ${r.status === 'running' ? '' : `<button class="rl-del" data-del="${esc(r.id)}" title="删除这条运行记录" aria-label="删除运行记录">✕</button>`}
+    </div>`;
+  }).join('');
+}
+function resetRunView() {
+  const pill = $('#runPill');
+  if (pill) { pill.textContent = '尚未运行'; pill.style.cssText = ''; }
+  if ($('#runMeta')) $('#runMeta').textContent = '';
+  if (state.def) paintRunState($('#runCanvas'), state.def, { nodes: {} });
+  if ($('#runDrawer')) $('#runDrawer').innerHTML = '<span class="note">点击节点查看请求 / 响应 / 重试记录</span>';
+  if ($('#eventLog')) $('#eventLog').innerHTML = '<div class="t">—— 事件流（SSE）等待中 ——</div>';
+  renderRunList();
+}
+async function deleteRunRecord(id) {
+  const r = (state.runList || []).find(x => x.id === id);
+  const label = r ? `#${r.num} · ${runStatusMeta(r.status).t} · ${_fmtTime(r.startedAt)}` : id;
+  if (!confirm(`删除这条运行记录？\n\n${label}\n\n只删历史记录 —— 事件流与运行对比里也会一并消失，不影响流程定义。`)) return;
+  try {
+    await api('/api/runs/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (state.run && state.run.id === id) { state.run = null; state.liveRun = null; resetRunView(); }
+    await refreshRunList({ auto: !state.run });
+    toast('已删除运行记录');
+  } catch (e) { alert('删除失败：' + e.message); }
+}
+async function clearRunRecords() {
+  const n = (state.runList || []).length;
+  if (!n || !state.flow) return;
+  if (!confirm(`清空当前流程的 ${n} 条运行记录？\n\n运行观测的事件流、运行对比都会一并消失，不可恢复。运行中的记录会保留。`)) return;
+  try {
+    const r = await api('/api/runs?flowId=' + encodeURIComponent(state.flow), { method: 'DELETE' });
+    state.run = null; state.liveRun = null;
+    resetRunView();
+    await refreshRunList({ auto: true });
+    toast(`已清空 ${r.deleted} 条运行记录`);
+  } catch (e) { alert('清空失败：' + e.message); }
 }
 async function loadRun(runId) {
   const run = await api('/api/runs/' + runId);
@@ -1836,6 +1935,7 @@ async function loadRun(runId) {
   renderRunHead(run);
   $('#eventLog').innerHTML = (run.events || []).map(fmtEvent).join('') || '<div class="t">（该 run 无事件记录）</div>';
   if (run.nodes && Object.keys(run.nodes).length) showRunResult(run);   // 默认先看流程返回结果，节点详情点画布节点
+  renderRunList();                                                     // 左栏高亮当前 run
 }
 /* 运行观测右栏：流程返回结果卡（终点节点的完整输出） */
 function showRunResult(run) {
@@ -1896,6 +1996,9 @@ function connectSSE() {
   ['run_start', 'node_start', 'node_end', 'node_retry', 'edge_data', 'edge_skip', 'error', 'assert_fail', 'run_end'].forEach(ev =>    state.sse.addEventListener(ev, e => {
       if (e.data == null) return;   // EventSource 原生 error（断连/重连）无 data，与业务 error 事件同名，须跳过
       const p = JSON.parse(e.data);
+      /* 左栏运行记录：本流程有新 run 或某条跑完 → 合并刷新（0.7s 窗口，批量跑不刷屏） */
+      if (p.event === 'run_start' && p.data && p.data.flowId === state.flow) scheduleRunListRefresh();
+      if (p.event === 'run_end' && (state.runList || []).some(r => r.id === p.data.runId)) scheduleRunListRefresh();
       /* 搭建器调试运行：同一条事件流实时喂给调试面板（画布着色 + 中间数据 chip + 日志） */
       if (state.debugRun && p.data && p.data.runId === state.debugRun.id) {
         const bLog = $('#dbgLog');
@@ -2000,9 +2103,9 @@ async function showRunDrawer(nodeId, run) {
   $('#btnReplay').onclick = async () => {
     try {
       const r = await api(`/api/runs/${run.id}/replay`, { method: 'POST', body: JSON.stringify({ fromNode: nodeId }) });
-      $('#runHist').value = '';
       $('#runPill').textContent = `重放已启动 → ${r.runId}`;
-      setTimeout(() => loadRun(r.runId).then(() => {}), 300);
+      refreshRunList({ auto: false });
+      setTimeout(() => loadRun(r.runId), 300);
     } catch (e) { alert('重放失败：' + e.message); }
   };
   if ($('#btnRaw')) $('#btnRaw').onclick = () => alert(JSON.stringify(rec.output, null, 1));
@@ -2038,9 +2141,29 @@ $('#btnRun').onclick = async () => {
     state.run = { id: r.runId, num: '?', nodes: {}, events: [] };
     state.liveRun = state.run;
     $('#runPill').textContent = '已触发 · 等待事件流…';
+    refreshRunList({ auto: false });          // 左栏马上出现这条 pending 记录
     setTimeout(() => loadRun(r.runId), 1200);
   } catch (e) { alert('运行失败：' + e.message); }
 };
+/* 左栏运行记录：筛选 / 点选载入 / 单条删除 / 清空 */
+$('#rlFilter').onclick = e => {
+  const b = e.target.closest('.rfchip');
+  if (!b) return;
+  state.runFilter = b.dataset.f || '';
+  renderRunList();
+};
+$('#rlList').addEventListener('click', e => {
+  const del = e.target.closest('.rl-del');
+  if (del) { e.stopPropagation(); deleteRunRecord(del.dataset.del); return; }
+  const it = e.target.closest('.rl-item');
+  if (it && it.dataset.run) loadRun(it.dataset.run);
+});
+$('#rlList').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const it = e.target.closest('.rl-item');
+  if (it) { e.preventDefault(); loadRun(it.dataset.run); }
+});
+$('#rlClear').onclick = clearRunRecords;
 
 /* ───────── 界面 2：接口注册表（把 API 接入智能体） ───────── */
 let _srcMode = 'url';

@@ -127,7 +127,11 @@ assert m['notify_erp']['statusA']=='done' and m['notify_erp']['statusB']=='done'
 " ; chk "逐节点 diff 正确标注差异" $?
 
 echo "══ T7 目录版本变更 → 失效告警 ══"
-# 自包含种子：恢复内置 query_stock → 发布一个绑定它的流程 → bump 触发 api_changed → 全部还原
+# 自包含种子：恢复内置 query_stock → 发布一个绑定它的流程 → bump 触发 api_changed → 按进入前的隐藏态还原
+QS_WAS_HIDDEN=$(curl -s $B/api/sources | $P -c "
+import sys,json
+s=json.load(sys.stdin)
+print('yes' if 'query_stock' in (s.get('hidden') or []) else 'no')")
 curl -s -X POST $B/api/ops/restore -H 'content-type: application/json' -d '{"ids":["query_stock"]}' > /dev/null
 cat > /tmp/e2e-bump.json <<EOF
 {"def":{"id":"flow_e2e_bump","name":"Bump告警种子","version":0,"trigger":{"type":"manual"},
@@ -152,7 +156,9 @@ assert a['type']=='api_changed' and 'v2026.11' in a['message'], a
 " ; chk "注册表 ETag 热更新触发流程失效告警" $?
 curl -s -X POST $B/api/admin/catalog-restore > /dev/null
 curl -s -X DELETE $B/api/flows/flow_e2e_bump > /dev/null
-curl -s -X POST $B/api/ops/batch-delete -H 'content-type: application/json' -d '{"ids":["query_stock"]}' > /dev/null   # 恢复用户环境（内置接口隐藏态）
+if [ "$QS_WAS_HIDDEN" = "yes" ]; then
+  curl -s -X POST $B/api/ops/batch-delete -H 'content-type: application/json' -d '{"ids":["query_stock"]}' > /dev/null   # 进入时它是隐藏的才藏回去
+fi
 
 echo "══ T8 SSE 事件流 ══"
 (curl -s -N --max-time 3 $B/api/events > /tmp/sse.txt) &
@@ -314,14 +320,21 @@ chk "Schema 闸拦截非法 end.assert 结构" $?
 
 echo "══ T16 搭建器「新建」语义（带 flowId + 新建关键词 → 生成新流程，旧草稿不动）══"
 $P - <<PYEOF
-import json,urllib.request
+import json,urllib.request,urllib.error
 op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 def api(p,m='POST',b=None):
     r=urllib.request.Request('$B'+p,method=m,data=json.dumps(b).encode() if b is not None else None,headers={'content-type':'application/json'})
-    with op.open(r,timeout=60) as x: return json.loads(x.read())
+    try:
+        with op.open(r,timeout=60) as x: return json.loads(x.read())
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f'422 debug: {p} -> {e.read().decode()[:300]} | {dbg()}')
 def dele(fid):
     rq=urllib.request.Request('$B/api/flows/'+fid,method='DELETE')
     op.open(rq,timeout=30).read()
+def dbg():
+    cat=json.loads(op.open('$B/api/catalog',timeout=30).read())
+    qs=[o for o in cat['operations'] if o['id']=='query_stock']
+    return f"ops={len(cat['operations'])} query_stock={json.dumps(qs[0],ensure_ascii=False)[:200] if qs else 'MISSING'}"
 base=json.load(open('/tmp/e2e-end.json'))['def']
 base['id']='flow_e2e_new'; base['name']='新建语义基准'
 api('/api/flows/flow_e2e_new/draft',b={'def':base})   # 建基准草稿

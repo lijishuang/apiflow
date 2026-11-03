@@ -241,6 +241,42 @@ body.col-resizing iframe,body.col-resizing .canvas{pointer-events:none}
 .eventlog .warn{color:#EFB35C}.eventlog .data{color:#7FD8C2}.eventlog .bad{color:#F08A8A}
 .eventlog b{font-weight:600;color:#D7E1EF}
 
+/* 运行记录左栏：一次运行一行，点开就是那一次的观测 */
+.runlist{width:252px;flex:none;background:var(--panel);border-right:1px solid var(--line-soft);display:flex;flex-direction:column;overflow:hidden}
+.rl-head{display:flex;align-items:center;gap:8px;padding:11px 12px 8px}
+.rl-head b{font-size:13px;font-weight:600;color:var(--ink-2)}
+.rl-mini{flex:none;border:1px solid var(--line);background:var(--bg2);color:var(--muted);border-radius:6px;font-size:11.5px;padding:2px 8px;cursor:pointer;transition:color .12s,border-color .12s}
+.rl-mini:hover:not(:disabled){color:var(--ink);border-color:var(--line)}
+.rl-mini:disabled{opacity:.35;cursor:default}
+.rl-filter{display:flex;gap:5px;padding:0 12px 9px}
+.rfchip{border:1px solid transparent;background:transparent;color:var(--muted);font-size:11.5px;padding:2px 8px;border-radius:999px;cursor:pointer;transition:background .12s,color .12s}
+.rfchip:hover{color:var(--ink-2);background:var(--bg3)}
+.rfchip.on{background:var(--teal-bg);color:var(--teal);border-color:var(--teal-line)}
+.rl-list{flex:1;overflow:auto;padding:0 8px 10px}
+.rl-item{position:relative;display:flex;gap:8px;padding:8px 9px;border:1px solid transparent;border-radius:8px;cursor:pointer;transition:background .12s,border-color .12s}
+.rl-item:hover{background:var(--bg2)}
+.rl-item.on{background:var(--bg3);border-color:var(--teal-line);box-shadow:inset 2px 0 0 var(--teal)}
+.rl-item:focus-visible{outline:2px solid var(--blue);outline-offset:-1px}
+.rl-dot{width:7px;height:7px;border-radius:50%;flex:none;margin-top:5px}
+.rl-dot.rl-live{animation:pulse 1.4s infinite}
+.rl-body{min-width:0;flex:1}
+.rl-row{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-2);min-width:0}
+.rl-item .rl-row:first-child{padding-right:18px}
+.rl-row b{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.rl-st{flex:none;font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:5px;line-height:1.5}
+.rl-trig{flex:none;font-size:10.5px;color:var(--muted);border:1px solid var(--line-soft);border-radius:5px;padding:0 5px;line-height:1.6}
+.rl-dur{flex:none;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rl-sub{font-size:10.5px;color:var(--muted);margin-top:3px}
+.rl-sub>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rl-err{margin-top:4px;font-size:10.5px;color:var(--bad);background:var(--bad-bg);border-radius:5px;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rl-del{position:absolute;top:6px;right:5px;width:18px;height:18px;border-radius:5px;border:1px solid transparent;background:var(--bg3);color:var(--muted);font-size:11px;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s,color .12s}
+.rl-item:hover .rl-del,.rl-del:focus-visible{opacity:1}
+.rl-del:hover{color:var(--bad);border-color:var(--line)}
+.rl-empty{padding:18px 12px;font-size:11.5px;color:var(--muted);text-align:center;line-height:1.9}
+@media (max-width:1120px){.runlist{width:214px}}
+@media (max-width:900px){.runlist{display:none}}
+
+
 /* ───────── 列表 / 表格 ───────── */
 .list{padding:24px 28px}
 .page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px}

@@ -38,8 +38,9 @@ echo "$BODY" | grep -q '"secure":true' && ok "响应含 secure:true / authAs" ||
 
 step "C5 单接口级绑定：secure_data → 凭证"
 # secure_data 可能已被移出注册表（用户自定义环境）—— 动态挑一个现存的只读接口替代
-# secure_data 可能已被移出注册表（用户自定义环境）—— 固定用内置 query_stock，先恢复再测，结尾删回
+# secure_data 可能已被移出注册表（用户自定义环境）—— 固定用内置 query_stock，先恢复再测，结尾按进入前的隐藏态还原
 BIND_OP=query_stock
+QS_WAS_HIDDEN=$(curl -s $BASE/api/sources | node -pe 'JSON.parse(require("fs").readFileSync(0)).hidden.includes("query_stock")')
 curl -s -X POST $BASE/api/ops/restore -H 'content-type: application/json' -d '{"ids":["query_stock"]}' > /dev/null
 B1=$(curl -s -X POST $BASE/api/creds/bind-op -H 'content-type: application/json' -d "{\"operationId\":\"$BIND_OP\",\"credId\":\"$CRED_ID\"}")
 echo "$B1" | grep -q '"ok":true' && ok "绑定成功" || bad "绑定失败: $B1"
@@ -119,8 +120,8 @@ step "C12 清理测试流程"
 curl -s -X DELETE $BASE/api/flows/flow_auth_t > /dev/null
 GET=$(curl -s -o /dev/null -w '%{http_code}' $BASE/api/flows/flow_auth_t/def); check "测试流程已删除" 404 "$GET"
 
-# 恢复用户环境：内置 query_stock 回到隐藏态（与测试前一致）
-curl -s -X POST $BASE/api/ops/batch-delete -H 'content-type: application/json' -d '{"ids":["query_stock"]}' > /dev/null
+# 恢复用户环境：query_stock 回到进入测试前的隐藏态（进入时可见就保持可见，别替用户做隐藏决定）
+[ "$QS_WAS_HIDDEN" = "true" ] && curl -s -X POST $BASE/api/ops/batch-delete -H 'content-type: application/json' -d '{"ids":["query_stock"]}' > /dev/null
 
 echo; echo "════ 认证回归：$PASS 通过 / $FAIL 失败 ════"
 [ "$FAIL" -eq 0 ] || exit 1
