@@ -618,6 +618,10 @@ function flowSummary(f) {
   const pub = f.published, dr = f.draft;
   const def = (pub && pub.def) || (dr && dr.def) || {};
   const last = store.listRuns(f.id)[0] || null;
+  // 节点进度：列表页进度条用。运行中的 run 与 store 同引用，这里读到的是实时状态
+  const lastRecs = last ? Object.values(last.nodes || {}) : [];
+  const nodeName = id => { const n = (def.nodes || []).find(x => x.id === id); return n ? (n.name || n.id) : id; };
+  const runningId = last ? Object.keys(last.nodes || {}).find(k => (last.nodes[k] || {}).status === 'running') : null;
   return {
     id: f.id, name: f.name,
     published: !!pub, version: pub ? pub.version : 0,
@@ -628,6 +632,10 @@ function flowSummary(f) {
     lastRun: last ? {
       id: last.id, num: last.num, status: last.status, trigger: last.trigger,
       startedAt: last.startedAt, durationMs: last.durationMs || null, actor: last.actor || null,
+      nodeTotal: (def.nodes || []).length,
+      nodeOk: lastRecs.filter(n => n.status === 'done' || n.status === 'reused').length,
+      nodeFail: lastRecs.filter(n => n.status === 'failed').length,
+      currentNode: runningId ? nodeName(runningId) : null,
     } : null,
   };
 }
@@ -1130,7 +1138,7 @@ const server = http.createServer(async (req, res) => {
         trigger: f.published ? f.published.def.trigger || null : null,
         source: (f.draft && f.draft.chat.length) || (f.published && f.published.def.source === 'nl') ? '自然语言生成' : '画布手绘',
         authId: (f.published && f.published.def.authId) || (f.draft && f.draft.def.authId) || null,
-        lastRun: store.listRuns(f.id)[0] || null,
+        lastRun: (() => { const r = store.listRuns(f.id)[0]; return r ? runListItem(r) : null; })(),   // 摘要含 nodeOk/nodeFail/nodeTotal，列表进度条直接用
       })));
     }
     if ((m = p.match(/^\/api\/flows\/([\w-]+)\/def$/)) && req.method === 'GET') {

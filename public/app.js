@@ -17,6 +17,8 @@ const state = {
   alerts: [],                   // 接口变更告警（右侧操作面板显示）
   creds: [], opBindings: {},    // AK/SK 凭证 + 单接口级绑定
   debugRun: null,               // 搭建器调试运行（{id, nodes, status}），SSE 事件实时喂给调试面板
+  flowProg: {},                 // 流程列表进度条：flowId -> {runId,num,status,done,fail,total,current,durationMs}
+  runFlowMap: {},               // runId -> flowId（node_start/node_end 事件只有 runId，靠它找回流）
   batchJob: null,               // 并行批跑（{id,total,done,items[]}），轮询 /api/batches/:id 刷新
   batchTimer: null, batchHideBar: false,
   news: null,                   // 版本更新记录（解析 CHANGELOG.md 的结果）
@@ -295,6 +297,54 @@ async function clearRunRecords() {
   }
 }
 
+/* ── 流程进度条：SSE 实时驱动（run_start 建档 → node_end 推进 → run_end 定格）──
+   没有实时进度时回退到 lastRun 摘要（后端 flowSummary 已带 nodeOk/nodeFail/nodeTotal） */
+function flowProgOf(f) {
+  const pr = state.flowProg[f.id];
+  if (pr && pr.runId === (f.lastRun && f.lastRun.id)) return pr;   // 落盘数据已跟上实时进度
+  if (pr && (pr.status === 'running' || (f.lastRun && f.lastRun.status === 'running'))) return pr;
+  if (f.lastRun) {
+    const lr = f.lastRun;
+    return { runId: lr.id, num: lr.num, status: lr.status, done: lr.nodeOk || 0,
+      fail: lr.nodeFail || 0, total: lr.nodeTotal || f.nodeCount || 0,
+      current: lr.currentNode || null, durationMs: lr.durationMs, stale: true };
+  }
+  return null;
+}
+function flowProgHtml(f) {
+  const pr = flowProgOf(f);
+  const box = cls => `<div class="fpbar" data-fpbar="${f.id}"><div class="fpbar-track"><div class="fpbar-fill ${cls}"></div></div><span class="fpbar-txt"></span></div>`;
+  if (!pr) return box('idle');
+  const total = Math.max(pr.total || 0, pr.done + pr.fail);
+  const pct = pr.status === 'running' ? Math.min(96, Math.round((pr.done / Math.max(total, 1)) * 100)) : 100;
+  let cls = 'idle', txt = '', tip = '';
+  if (pr.status === 'running') {
+    cls = 'run';
+    txt = pr.total ? `运行中 ${pr.done}/${pr.total}${pr.current ? ' · ' + pr.current : ''}` : '运行中…';
+  } else if (pr.status === 'success') {
+    cls = 'ok'; tip = `#${pr.num} 成功 · ${fmtDur(pr.durationMs)} · ${pr.done}/${total || pr.done} 节点`;
+  } else if (pr.status) {
+    cls = 'bad'; tip = `#${pr.num} ${pr.status}${pr.fail ? ` · ${pr.fail} 个节点失败` : ''}`;
+    txt = pr.fail ? `${pr.done}/${total} 节点` : '';
+  }
+  return `<div class="fpbar" data-fpbar="${f.id}" title="${esc(tip)}"><div class="fpbar-track"><div class="fpbar-fill ${cls}" style="width:${pct}%"></div></div>${txt ? `<span class="fpbar-txt">${esc(txt)}</span>` : ''}</div>`;
+}
+/* 单行局部刷新（SSE 高频事件不重绘整表） */
+function paintFlowProg(flowId) {
+  const f = state.flows.find(x => x.id === flowId);
+  const el = document.querySelector(`#flowRows [data-fpbar="${flowId}"]`);
+  if (f && el) { el.outerHTML = flowProgHtml(f); paintFlowPanelLive(); }
+}
+/* 右栏面板的实时执行状态行 */
+function paintFlowPanelLive() {
+  const box = $('#fpLive');
+  if (!box) return;
+  const f = currentFlow();
+  const pr = f ? state.flowProg[f.id] : null;
+  if (!pr || pr.status !== 'running') { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="fp-live"><span class="fp-dot"></span>运行中 · 已完成 ${pr.done}/${pr.total || '?'}${pr.fail ? ` · 失败 ${pr.fail}` : ''}${pr.current ? ` · 正在执行：<b>${esc(pr.current)}</b>` : ''}　<button class="btn mini" onclick="openRun('${f.id}')">看事件流</button></div>`;
+}
+
 /* ───────── 界面 1：流程列表（左列表 / 右操作面板，接口变更告警在右侧栏显示） ───────── */
 async function loadFlows() {
   const [flows, alerts, credData] = await Promise.all([
@@ -312,12 +362,20 @@ async function loadFlows() {
     const checked = state.batch.has(f.id);
     return `<tr class="${state.selFlow === f.id ? 'sel' : ''}${f.version > 0 ? '' : ' unpublished'}" data-flow="${f.id}">
       <td class="ck"><input type="checkbox" data-ck="${f.id}" ${checked ? 'checked' : ''} aria-label="选择 ${esc(f.name)}"></td>
-      <td><b>${esc(f.name)}</b><div class="note">${f.nodeCount} 节点 · ${f.id}${f.version > 0 ? '' : ' · 未发布'}</div></td>
+      <td><b>${esc(f.name)}</b><div class="note">${f.nodeCount} 节点 · ${f.id}${f.version > 0 ? '' : ' · 未发布'}</div>${flowProgHtml(f)}</td>
       <td><span class="vtag">v${f.version}</span></td>
       <td>${esc(trig)}</td>
       <td>${last}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="5" class="note">还没有流程，点击右上角「新建流程」用自然语言创建</td></tr>';
+  // 落盘里已在运行的 run（页面刷新 / 后台批跑 / 定时触发）→ 建立实时档案，后续 SSE 事件才能接上
+  for (const f of state.flows) {
+    const lr = f.lastRun;
+    if (lr && lr.status === 'running' && (!state.flowProg[f.id] || state.flowProg[f.id].runId !== lr.id)) {
+      state.flowProg[f.id] = { runId: lr.id, num: lr.num, status: 'running', done: lr.nodeOk || 0, fail: lr.nodeFail || 0,
+        total: lr.nodeTotal || f.nodeCount || 0, current: lr.currentNode || null };
+    }
+  }
   syncBatchBar();
   renderFlowPanel();
 }
@@ -412,6 +470,7 @@ function renderFlowPanel() {
            <button class="btn wide" id="fpOpen">查看运行观测</button>`
         : `<button class="btn primary wide" id="fpRun" title="未发布流程不能直接运行 —— 点击载入搭建器完成三道闸">⚠ 未发布 · 去搭建器完成发布</button>
            <p class="note" style="margin-top:8px">未发布流程不能运行 —— 先到搭建器完成三道闸（① Schema 校验 → ② Dry-run → ③ 画布确认发布），发布后即可在此运行。</p>`}
+      <div id="fpLive"></div>
       <button class="btn wide" id="fpEdit">编辑画布</button>
     </div>
     <div class="panel-sec">
@@ -454,13 +513,24 @@ async function loadRunsMini(flowId) {
 }
 async function runFlow(flowId) {
   try {
+    const f0 = state.flows.find(x => x.id === flowId);
+    // 乐观置为运行中：POST /run 是同步等待跑完才返回的，先让进度条动起来，SSE 事件随后接管
+    state.flowProg[flowId] = { runId: state.flowProg[flowId] && state.flowProg[flowId].runId, num: f0 && f0.lastRun ? f0.lastRun.num + 1 : null,
+      status: 'running', done: 0, fail: 0, total: f0 ? f0.nodeCount : 0, current: null, pending: true };
+    paintFlowProg(flowId);
+    paintFlowPanelLive();
     await api(`/api/flows/${flowId}/run`, { method: 'POST' });
     await loadFlows();
     renderFlowPanel();
     const f = currentFlow();
     const box = $('#fpCmpResult');
     if (box && f && f.lastRun) box.innerHTML = `<div class="msg-ok">已触发运行 #${f.lastRun.num}，事件流见「运行观测」。</div>`;
-  } catch (e) { alert('运行失败：' + e.message); }
+  } catch (e) {
+    delete state.flowProg[flowId];   // 触发失败：撤掉乐观的运行中状态
+    const f = state.flows.find(x => x.id === flowId);
+    if (f) { paintFlowProg(flowId); paintFlowPanelLive(); }
+    alert('运行失败：' + e.message);
+  }
 }
 async function clearAlert(id) { await api(`/api/alerts/${encodeURIComponent(id)}/clear`, { method: 'POST' }); loadFlows(); }
 async function setFlowAuth(flowId, authId) {
@@ -1996,6 +2066,35 @@ function connectSSE() {
   ['run_start', 'node_start', 'node_end', 'node_retry', 'edge_data', 'edge_skip', 'error', 'assert_fail', 'run_end'].forEach(ev =>    state.sse.addEventListener(ev, e => {
       if (e.data == null) return;   // EventSource 原生 error（断连/重连）无 data，与业务 error 事件同名，须跳过
       const p = JSON.parse(e.data);
+      /* 流程列表进度条：run_start 建档 → node_start/node_end 推进 → run_end 定格（调试试跑不算） */
+      if (p.data && !(p.data.meta && p.data.meta.dryRun) && p.data.trigger !== 'dry-run') {
+        if (p.event === 'run_start' && p.data.flowId) {
+          state.runFlowMap[p.data.runId] = p.data.flowId;
+          const fl = state.flows.find(x => x.id === p.data.flowId);
+          state.flowProg[p.data.flowId] = { runId: p.data.runId, num: p.data.num, status: 'running',
+            done: 0, fail: 0, total: fl ? fl.nodeCount : 0, current: null };
+          paintFlowProg(p.data.flowId);
+        } else if (state.runFlowMap[p.data.runId]) {
+          const fid = state.runFlowMap[p.data.runId];
+          const pr = state.flowProg[fid];
+          if (pr && pr.status === 'running') {
+            if (p.event === 'node_start') { pr.current = p.data.name || p.data.node; paintFlowProg(fid); }
+            if (p.event === 'node_end') {
+              if (p.data.status === 'done' || p.data.status === 'reused') pr.done++;
+              else if (p.data.status === 'failed') pr.fail++;
+              pr.current = null;
+              paintFlowProg(fid);
+            }
+            if (p.event === 'run_end') {
+              pr.status = p.data.status; pr.durationMs = p.data.durationMs; pr.current = null;
+              paintFlowProg(fid);
+              delete state.runFlowMap[p.data.runId];
+              // 定格后等落盘跟上，若流程列表在前台则刷一次（最近运行 pill / 右栏摘要同步）
+              setTimeout(() => { const on = document.querySelector('.tab.on'); if (on && on.dataset.s === 'list') loadFlows(); }, 900);
+            }
+          }
+        }
+      }
       /* 左栏运行记录：本流程有新 run 或某条跑完 → 合并刷新（0.7s 窗口，批量跑不刷屏） */
       if (p.event === 'run_start' && p.data && p.data.flowId === state.flow) scheduleRunListRefresh();
       if (p.event === 'run_end' && (state.runList || []).some(r => r.id === p.data.runId)) scheduleRunListRefresh();
