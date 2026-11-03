@@ -98,6 +98,8 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .kind.draft-flow{background:var(--purple-bg);color:var(--purple)}
 .kind.query{background:var(--amber-bg);color:var(--amber)}
 .kind.error{background:var(--bad-bg);color:var(--bad)}
+.kind.query.done{background:var(--ok-bg);color:var(--ok)}
+.kind.done::after{content:' ✓'}
 .plan .target{font-size:13.5px;font-weight:600;margin-bottom:2px}
 .plan .target code{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400;margin-left:6px}
 .plan .reason{font-size:12px;color:var(--muted)}
@@ -110,7 +112,24 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .plan .acts button:disabled{opacity:.5;cursor:default}
 .refs{display:flex;flex-wrap:wrap;gap:5px}
 .refchip{font-size:11px;color:var(--purple);background:var(--purple-bg);border-radius:5px;padding:1px 7px;cursor:default;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.qres{white-space:pre-wrap;font-size:12.5px;color:var(--ink2);background:var(--bg1);border:1px solid var(--line);border-radius:10px;padding:9px 11px;word-break:break-word}
+.qres{font-size:12.5px;color:var(--ink2);background:var(--bg1);border:1px solid var(--line);border-radius:10px;padding:9px 11px;word-break:break-word}
+.qres .qhead{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);margin-bottom:7px}
+.qres .qhead b{font-size:11.5px;font-weight:700;color:var(--ink2);letter-spacing:.3px}
+.qres .qhead .qsrc{margin-left:auto;font-size:10px;padding:0 7px;border-radius:20px;background:var(--bg3);color:var(--muted)}
+.qres .qlist{display:flex;flex-direction:column;gap:5px}
+.qres .qi{border:1px solid var(--line-soft);border-radius:8px;padding:5px 8px;background:var(--bg2)}
+.qres .qr1{display:flex;align-items:center;gap:6px;min-width:0}
+.qres .qr1 b{font-size:12.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qres .qnum{font-family:var(--mono);font-size:11px;color:var(--muted);flex:none}
+.qres .qv{font-family:var(--mono);font-size:10.5px;color:var(--muted);flex:none}
+.qres .qst{font-size:10px;padding:0 6px;border-radius:20px;flex:none;margin-left:auto;background:var(--bg3);color:var(--muted)}
+.qres .qst.success{background:var(--ok-bg);color:var(--ok)}
+.qres .qst.failed{background:var(--bad-bg);color:var(--bad)}
+.qres .qst.running{background:var(--blue-bg);color:var(--blue)}
+.qres .qmeta{font-size:11px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qres .qerr{font-size:11px;color:var(--bad);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.qres .qmore{font-size:11px;color:var(--muted);margin-top:6px}
+.qres .qtext{white-space:pre-wrap}
 
 /* 运行轨迹 */
 .trace{border:1px solid var(--line);border-radius:11px;background:var(--bg1);overflow:hidden}

@@ -126,7 +126,7 @@ function depHTML(t, id) {
 const CHAT_KEY = 'apiflow.chat';
 function persistChat() {
   try {
-    const msgs = S.msgs.slice(-40).map(m => ({ id: m.id, role: m.role, text: m.text || '', plan: m.plan || null, runId: m.runId || null }));
+    const msgs = S.msgs.slice(-40).map(m => ({ id: m.id, role: m.role, text: m.text || '', plan: m.plan || null, runId: m.runId || null, qres: m.qres || null }));
     localStorage.setItem(CHAT_KEY, JSON.stringify({ ts: Date.now(), msgs }));
   } catch { /* 存不下就算了 */ }
 }
@@ -139,6 +139,14 @@ async function restoreChat() {
     const nm = pushMsg({ role: 'agent', text: m.text, plan: m.plan, runId: m.runId });
     if (m.plan) { nm.el.innerHTML = planHTML(m.plan, nm); attachPlanHandlers(nm); }
     else if (m.text) nm.el.innerHTML = `<div class="agent-text">${esc(m.text)}</div>`;
+    if (m.qres) {
+      nm.qres = m.qres;
+      nm.el.insertAdjacentHTML('beforeend', renderQueryResult(m.qres));
+      const kd = nm.el.querySelector('.plan .kind');
+      if (kd) kd.classList.add('done');
+      const b = nm.el.querySelector('.plan [data-act="exec"]');
+      if (b) { b.disabled = false; b.textContent = '↻ 重新查询'; }
+    }
     if (m.runId) attachTrace(nm, m.runId);
   }
   scrollBottom();
@@ -429,14 +437,17 @@ function planHTML(plan, m) {
   if (plan.kind === 'run-flow' && plan.flow) target = `${esc(plan.flow.name)} <code>${plan.flow.published ? 'v' + plan.flow.version : '未发布 · 试跑'} · ${plan.flow.nodeCount || ''} 节点</code>`;
   if (plan.kind === 'debug-op' && plan.op) target = `${esc(plan.op.name)} <code>${esc(plan.op.method)} ${esc(plan.op.path)}</code>`;
   if (plan.kind === 'draft-flow' && plan.draft) target = `${esc(plan.draft.name)} <code>${(plan.draft.nodes || []).length} 个接口 · ${plan.draft.writeCount || 0} 个写操作</code>`;
-  if (plan.kind === 'query') target = esc((plan.query || {}).kind || '');
+  if (plan.kind === 'query') {
+    const k = (plan.query || {}).kind || '';
+    target = esc(QKIND[k] || '平台现状');
+  }
   const args = Object.entries(plan.args || {}).map(([k, v]) => `<span class="argchip">${esc(k)}=${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</span>`);
   for (const p of plan.missingParams || []) args.push(`<span class="argchip miss">${esc(p)} 缺值</span>`);
   if (plan.kind !== 'query' && (plan.args && Object.keys(plan.args).length || (plan.missingParams || []).length)) extra = `<div class="args">${args.join('')}</div>`;
   const refs = (plan.refs || []).map(r => `<span class="refchip" title="${esc((r.sig || '') + ' ' + (r.summary || ''))}">${esc((r.parent ? r.parent + '.' : '') + r.name)}</span>`).join('');
   const btns = plan.kind === 'error' ? '' : `
     <div class="acts">
-      <button class="primary" data-act="exec">${plan.needsConfirm ? '确认执行' : '执行'}</button>
+      <button class="primary" data-act="exec">${plan.kind === 'query' ? '查询' : plan.needsConfirm ? '确认执行' : '执行'}</button>
       ${plan.kind === 'query' ? '' : '<button data-act="web">Web 打开</button>'}
     </div>`;
   return `
@@ -448,6 +459,62 @@ function planHTML(plan, m) {
       ${refs ? `<div class="refs" style="margin-top:6px">${refs}</div>` : ''}
       ${btns}
     </div>`;
+}
+
+/* 查询结果：能结构化就结构化（流程 / 运行 / 接口 / 资料），拿不到 data 时退回服务端文本 */
+const QKIND = { flows: '流程', runs: '运行记录', ops: '可用接口', materials: 'SDK 资料', alerts: '告警', overview: '平台概况' };
+const stText = s => s === 'success' ? '成功' : s === 'failed' ? '失败' : s === 'running' ? '运行中' : (s || '—');
+function renderQueryResult(q) {
+  const kind = (q && q.queryKind) || '';
+  const all = Array.isArray(q && q.data) ? q.data : [];
+  const LIMIT = 8;
+  let sum = '', items = [];
+  if (kind === 'flows' && all.length) {
+    const pub = all.filter(f => f.published).length;
+    sum = `${all.length} 个 · ${pub} 个已发布 / ${all.length - pub} 个草稿`;
+    items = all.slice(0, LIMIT).map(f => {
+      const lr = f.lastRun;
+      return `<div class="qi">
+        <div class="qr1"><b>${esc(f.name)}</b><span class="qv">${f.published ? 'v' + f.version : '未发布'}</span>
+          ${lr ? `<span class="qst ${esc(lr.status || '')}">${esc(stText(lr.status))}</span>` : ''}</div>
+        <div class="qmeta">${f.httpCount || f.nodeCount || 0} 个接口 · ${lr ? `最近${esc(stText(lr.status))} ${fmtAgo(lr.startedAt)}` : '还没运行过'}</div>
+      </div>`;
+    });
+  } else if (kind === 'runs' && all.length) {
+    const fail = all.filter(r => r.status === 'failed').length;
+    sum = `${all.length} 条 · ${fail ? fail + ' 条失败' : '全部成功'}`;
+    items = all.slice(0, LIMIT).map(r => `<div class="qi">
+        <div class="qr1"><span class="qnum">#${esc(r.num)}</span><b>${esc(r.flowName || r.flowId)}</b><span class="qst ${esc(r.status || '')}">${esc(stText(r.status))}</span></div>
+        <div class="qmeta">${esc(fmtMs(r.durationMs))} · ${esc(TRIG[r.trigger] || r.trigger || '—')} · ${fmtAgo(r.startedAt)}${r.version ? ' · v' + esc(r.version) : ''}</div>
+        ${r.error ? `<div class="qerr">${esc(r.error)}</div>` : ''}
+      </div>`);
+  } else if (kind === 'ops' && all.length) {
+    sum = `${all.length} 个接口可调`;
+    items = all.slice(0, LIMIT).map(o => `<div class="qi">
+        <div class="qr1"><b>${esc(o.name || o.id)}</b><span class="qv">${esc(o.method || '')}</span>${o.readOnly === false ? '<span class="qst failed">写</span>' : ''}</div>
+        <div class="qmeta">${esc(o.path || '')}</div>
+      </div>`);
+  } else if (kind === 'materials' && all.length) {
+    sum = `${all.length} 条 · 函数 / 类 / 参数`;
+    items = all.slice(0, LIMIT).map(s => `<div class="qi">
+        <div class="qr1"><b>${esc((s.parent ? s.parent + '.' : '') + s.name)}</b><span class="qv">${esc(s.kind || '')}</span></div>
+        <div class="qmeta">${esc(s.sig || s.summary || '')}</div>
+      </div>`);
+  } else if (kind === 'alerts' && all.length) {
+    sum = `${all.length} 条待处理`;
+    items = all.slice(0, LIMIT).map(a => `<div class="qi">
+        <div class="qr1"><b>${esc(a.message || a.id)}</b><span class="qst failed">待处理</span></div>
+        ${a.createdAt ? `<div class="qmeta">${fmtAgo(a.createdAt)}</div>` : ''}
+      </div>`);
+  }
+  const more = all.length > LIMIT ? `<div class="qmore">还有 ${all.length - LIMIT} 条，可在 Web 控制台看完整列表</div>` : '';
+  const body = items.length
+    ? `<div class="qlist">${items.join('')}</div>${more}`
+    : `<div class="qtext">${esc((q && q.text) || '没有数据')}</div>`;
+  return `<div class="qres" data-q="${esc(kind)}">
+    <div class="qhead"><b>${esc(QKIND[kind] || '查询结果')}</b>${sum ? `<span>${esc(sum)}</span>` : ''}<span class="qsrc">平台实时</span></div>
+    ${body}
+  </div>`;
 }
 
 function attachPlanHandlers(m) {
@@ -486,7 +553,8 @@ async function send() {
 async function executePlan(m, { confirm }) {
   const planEl = m.el.querySelector('.plan');
   const btn = planEl && planEl.querySelector('[data-act="exec"]');
-  if (btn) { btn.disabled = true; btn.textContent = '执行中…'; }
+  const isQuery = !!(m.plan && m.plan.kind === 'query');
+  if (btn) { btn.disabled = true; btn.textContent = isQuery ? '查询中…' : '执行中…'; }
   try {
     const r = await APF.request('/api/agent/execute', { method: 'POST', body: { text: m.text, confirm: !!confirm }, timeout: 30000 });
     if (r.status === 428 || r.data.confirmRequired) {
@@ -506,13 +574,20 @@ async function executePlan(m, { confirm }) {
     if (!r.ok) {
       const reason = r.data.plan && r.data.plan.reason;
       if (planEl) planEl.insertAdjacentHTML('beforeend', `<div class="reason" style="color:var(--bad)">✕ ${esc(r.data.error || '执行失败')}${reason ? '' : ''}</div>`);
-      if (btn) { btn.disabled = false; btn.textContent = '重试'; }
+      if (btn) { btn.disabled = false; btn.textContent = (m.plan && m.plan.kind === 'query') ? '重试查询' : '重试'; }
       scrollBottom();
       return;
     }
     if (r.data.kind === 'query') {
       const q = r.data.query || {};
-      m.el.insertAdjacentHTML('beforeend', `<div class="qres">${esc(q.text || '')}</div>`);
+      m.qres = q;
+      const old = m.el.querySelector('.qres');
+      if (old) old.remove();                       // 重新查询：替换上一次结果，不叠加
+      m.el.insertAdjacentHTML('beforeend', renderQueryResult(q));
+      if (btn) { btn.disabled = false; btn.textContent = '↻ 重新查询'; }
+      const kd = planEl && planEl.querySelector('.kind');
+      if (kd) kd.classList.add('done');
+      persistChat();
       scrollBottom();
       return;
     }
