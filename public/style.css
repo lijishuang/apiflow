@@ -2,6 +2,9 @@
    视觉母题来自 monitor.html 三状态原型：深空灰阶 + 单一 teal 强调 + 深色终端面板；
    故障态时红即是唯一警报。变量名与 app.js 内联引用保持兼容 */
 :root{
+  /* 让浏览器原生控件（select 弹出层、滚动条、复选框、日期选择器）跟随深色主题，
+     否则未单独着色的原生 select 会白底黑字，在深色页面上很扎眼 */
+  color-scheme:dark;
   /* 深空灰阶（bg0→bg3 表面层级） */
   --bg0:#0B0E14; --bg1:#10141C; --bg2:#151B26; --bg3:#1B2230;
   --bg:var(--bg0); --bg-soft:var(--bg3); --panel:var(--bg1);
@@ -38,6 +41,7 @@
 }
 /* ── 浅色主题 ── */
 :root[data-theme="light"]{
+  color-scheme:light;
   --bg0:#F4F6FA; --bg1:#FFFFFF; --bg2:#EEF1F7; --bg3:#E5EAF2;
   --bg:var(--bg0); --bg-soft:var(--bg3); --panel:var(--bg1);
   --ink:#1B2434; --ink-2:#3C4762; --muted:#68738E; --faint:#8B95AC;
@@ -586,3 +590,7 @@ tbody tr:hover{background:var(--bg2)}
 .canvas.linking .node{cursor:crosshair}
 .canvas.linking .node:hover{border-color:var(--blue)}
 #opPickList .srccard{margin-bottom:8px}
+
+/* ── 凭证卡片的模式下拉（此前是裸 select，原生白底，深色页面上很扎眼）── */
+.srccard .acts .mode-sel{flex:0 0 auto;max-width:none;font-size:12.5px;padding:4px 7px;background:var(--bg0)}
+.srccard .acts .mode-sel:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(47,191,143,.15)}
