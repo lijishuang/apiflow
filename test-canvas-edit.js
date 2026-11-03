@@ -31,13 +31,13 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   console.log('── E2 添加接口（选择器 + 自动连线）──');
   await page.click('#btnAddNode');
   await sleep(400);
-  const pickCount = await page.locator('#opPickList .srccard').count();
+  const pickCount = await page.locator('#opPickList .oprow').count();
   (pickCount > 5 ? ok : bad)(`接口选择器列出 ${pickCount} 个接口`);
   // 从当前目录动态挑接口 —— 不写死接口名（目录内容随接入来源变化）
   const pick1 = await page.evaluate(() => { const o = state.catalog.operations[0]; return { name: o.name, id: o.id }; });
   await page.fill('#opPickSearch', pick1.name);
   await sleep(300);
-  if (await page.locator('#opPickList .srccard').count() > 0) await page.locator('#opPickList .srccard').first().click();
+  if (await page.locator('#opPickList .oprow').count() > 0) await page.locator('#opPickList .oprow').first().click();
   else await page.evaluate(id => pickOperation(id), pick1.id);   // 名字搜不到时直接点选
   await sleep(700);
   eq('添加后画布 3 节点（2 真实 + 1 自动结束）', 3, await page.locator('#buildCanvas .node').count());
@@ -56,7 +56,7 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   await page.click('#btnAddNode'); await sleep(300);
   await page.fill('#opPickSearch', pick2.name);
   await sleep(300);
-  if (await page.locator('#opPickList .srccard').count() > 0) await page.locator('#opPickList .srccard').first().click();
+  if (await page.locator('#opPickList .oprow').count() > 0) await page.locator('#opPickList .oprow').first().click();
   else await page.evaluate(id => pickOperation(id), pick2.id);
   await sleep(700);
   eq('添加第二个接口后 4 节点（3 真实 + 1 结束）', 4, await page.locator('#buildCanvas .node').count());

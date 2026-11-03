@@ -1316,9 +1316,10 @@ function renderOpPick(q) {
   const ops = (state.catalog.operations || []).filter(o =>
     !kw || [o.name, o.path, o.id, ...(o.keywords || [])].join(' ').toLowerCase().includes(kw));
   $('#opPickList').innerHTML = ops.length ? ops.map(o => `
-    <div class="srccard" style="cursor:pointer;margin-bottom:8px" onclick="pickOperation('${o.id}')">
-      <div class="h"><span class="vtag">${esc(o.method || 'GET')}</span>${esc(o.name)}<span style="flex:1"></span><span class="m">${esc((o.baseUrl || '') + (o.path || ''))}</span></div>
-      <div class="m">${esc(o.description || '')}${o.readOnly === false ? ' · <b style="color:var(--amber)">写操作（已预置幂等键）</b>' : ''} · 参数：${esc((o.params || []).join(', ') || '无')}</div>
+    <div class="oprow" onclick="pickOperation('${o.id}')">
+      <div class="h"><span class="vtag">${esc(o.method || 'GET')}</span><span class="nm">${esc(o.name)}</span><span style="flex:1"></span><span class="oid">${esc(o.id)}</span></div>
+      <div class="m">${esc((o.baseUrl || '') + (o.path || ''))}</div>
+      <div class="meta">参数：${esc((o.params || []).join(', ') || '无')}${o.readOnly === false ? ' · <b style="color:var(--amber)">写操作（已预置幂等键）</b>' : ''}</div>
     </div>`).join('')
     : '<div class="empty">没有匹配的接口。可以先到「接口」页接入 OpenAPI / 导入 SDK，再回来添加。</div>';
 }

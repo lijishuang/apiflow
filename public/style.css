@@ -644,6 +644,14 @@ tbody tr:hover{background:var(--bg2)}
 .canvas.linking .node{cursor:crosshair}
 .canvas.linking .node:hover{border-color:var(--blue)}
 #opPickList .srccard{margin-bottom:8px}
+/* 接口选择器弹窗行卡：占满宽度、紧凑单行（不复用接口页 .srccard 的窄卡两列布局） */
+.oprow{width:100%;background:var(--panel);border:1px solid var(--line-soft);border-radius:10px;padding:8px 12px;cursor:pointer;transition:border-color .12s,background .12s;margin-bottom:6px}
+.oprow:hover{border-color:var(--teal);background:var(--bg2)}
+.oprow .h{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;min-width:0}
+.oprow .h .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oprow .h .oid{font-size:11.5px;font-weight:400;color:var(--faint);font-family:var(--font-mono);white-space:nowrap}
+.oprow .m{font-size:12px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oprow .meta{font-size:12px;color:var(--muted);margin-top:2px}
 
 /* ── 凭证卡片的模式下拉（此前是裸 select，原生白底，深色页面上很扎眼）── */
 .srccard .acts .mode-sel{flex:0 0 auto;max-width:none;font-size:12.5px;padding:4px 7px;background:var(--bg0)}
