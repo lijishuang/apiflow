@@ -875,8 +875,8 @@ function renderCanvas(el, def, mode, runState) {
     div.dataset.node = n.id;
     const [bt, bs] = nodeBadge(n);
     const sub = n.type === 'http' ? n.config.url.replace(/^https?:\/\/[^/]+/, '') : n.type === 'condition' ? n.config.expr : n.type === 'loop' ? (n.config.over || '') : (n.type === 'transform' ? '转换' : 'input');
-    div.innerHTML = `<div class="row1"><span class="badge" style="${bs}">${bt}</span><span class="name" title="${esc(n.name)}">${esc(n.name)}</span><span style="flex:1"></span>${n.assert ? '<span class="atag" title="已配置断言检查">✓A</span>' : ''}${mode === 'edit' && n.type !== 'start' ? `<button class="node-del" title="删除此节点（相关连线一并移除）">✕</button>` : ''}<span class="dot"></span></div>
-      <div class="sub" title="${esc(sub)}">${esc(sub)}</div>
+    div.innerHTML = `<div class="row1"><span class="badge" style="${bs}">${bt}</span><span class="name">${esc(n.name)}</span><span style="flex:1"></span>${n.assert ? '<span class="atag" title="已配置断言检查">✓A</span>' : ''}${mode === 'edit' && n.type !== 'start' ? `<button class="node-del" title="删除此节点（相关连线一并移除）">✕</button>` : ''}<span class="dot"></span></div>
+      <div class="sub">${esc(sub)}</div>
       <div class="meta"></div>`;
     const delBtn = div.querySelector('.node-del');
     if (delBtn) delBtn.onclick = ev => { ev.stopPropagation(); removeNode(n.id); };
@@ -1168,6 +1168,55 @@ document.addEventListener('click', e => {
     setTimeout(() => { b.textContent = '⧉ 复制 JSON'; }, 1500);
   }).catch(() => {});
 });
+
+/* 画布节点全文提示：节点内名称/副标题/meta 被截断时，悬停即浮现完整内容（搭建器与运行观测通用） */
+(function initNodeTip() {
+  let tip = null;
+  function ensureTip() {
+    if (tip) return tip;
+    tip = document.createElement('div');
+    tip.id = 'nodeTip';
+    document.body.appendChild(tip);
+    return tip;
+  }
+  function truncated(el) { return el && el.scrollWidth > el.clientWidth + 1; }
+  function gather(node) {
+    const parts = [];
+    const name = node.querySelector('.name');
+    const sub = node.querySelector('.sub');
+    const meta = node.querySelector('.meta');
+    if (name && truncated(name)) parts.push(`<b>${esc(name.textContent)}</b>`);
+    if (sub && truncated(sub)) parts.push(`<span class="mono">${esc(sub.textContent)}</span>`);
+    if (meta && truncated(meta)) parts.push(`<span>${esc(meta.textContent.replace(/\s+/g, ' ').trim())}</span>`);
+    return parts;
+  }
+  function moveTip(e) {
+    if (!tip || !tip.classList.contains('show')) return;
+    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > innerWidth - 8) x = e.clientX - w - pad;
+    if (y + h > innerHeight - 8) y = e.clientY - h - pad;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  document.addEventListener('mouseover', e => {
+    const node = e.target.closest && e.target.closest('.node');
+    const t = ensureTip();
+    if (!node || !node.closest('.canvas')) { t.classList.remove('show'); return; }
+    const parts = gather(node);
+    if (!parts.length) { t.classList.remove('show'); return; }
+    t.innerHTML = parts.join('');
+    t.classList.add('show');
+    moveTip(e);
+  });
+  document.addEventListener('mousemove', moveTip);
+  document.addEventListener('mouseout', e => {
+    const from = e.target.closest && e.target.closest('.node');
+    const to = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.node');
+    if (from && !to && tip) tip.classList.remove('show');
+  });
+  // 点击节点（打开属性面板/弹窗）时收起，避免遮挡
+  document.addEventListener('mousedown', () => { if (tip) tip.classList.remove('show'); });
+})();
 
 /* ───────── 界面 2：搭建器 ───────── */
 function switchTab(s) { document.querySelector(`.tab[data-s="${s}"]`).click(); }
