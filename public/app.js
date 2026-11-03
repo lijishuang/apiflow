@@ -702,7 +702,16 @@ function renderCanvas(el, def, mode, runState) {
     chip.onclick = () => { if (chip.dataset.full) showDataFlow(e.from, e.to, chip.dataset.full); };
     el.appendChild(chip);
 
-    const rec = { from: e.from, to: e.to, path, label, chip };
+    rec = { from: e.from, to: e.to, path, label, chip };
+    // 编辑模式下，边中点放一个小 ✕：点一下就删掉这条连线
+    if (mode === 'edit') {
+      const del = document.createElement('div');
+      del.className = 'edge-del'; del.textContent = '✕';
+      del.title = '删除这条连线';
+      del.onclick = ev => { ev.stopPropagation(); removeEdge(e.from, e.to); };
+      el.appendChild(del);
+      rec.del = del;
+    }
     canvas.edges.push(rec);
     canvas.edgeEls[e.from + '->' + e.to] = path;
     updateEdge(canvas, rec);
@@ -718,11 +727,14 @@ function renderCanvas(el, def, mode, runState) {
     div.dataset.node = n.id;
     const [bt, bs] = nodeBadge(n);
     const sub = n.type === 'http' ? n.config.url.replace(/^https?:\/\/[^/]+/, '') : n.type === 'condition' ? n.config.expr : n.type === 'loop' ? (n.config.over || '') : (n.type === 'transform' ? '转换' : 'input');
-    div.innerHTML = `<div class="row1"><span class="badge" style="${bs}">${bt}</span><span class="name">${esc(n.name)}</span><span style="flex:1"></span>${n.assert ? '<span class="atag" title="已配置断言检查">✓A</span>' : ''}<span class="dot"></span></div>
+    div.innerHTML = `<div class="row1"><span class="badge" style="${bs}">${bt}</span><span class="name">${esc(n.name)}</span><span style="flex:1"></span>${n.assert ? '<span class="atag" title="已配置断言检查">✓A</span>' : ''}${mode === 'edit' && n.type !== 'start' ? `<button class="node-del" title="删除此节点（相关连线一并移除）">✕</button>` : ''}<span class="dot"></span></div>
       <div class="sub">${esc(sub)}</div>
       <div class="meta"></div>`;
+    const delBtn = div.querySelector('.node-del');
+    if (delBtn) delBtn.onclick = ev => { ev.stopPropagation(); removeNode(n.id); };
     div.onclick = () => {
       if (div.__justDragged) { div.__justDragged = false; return; }   // 拖拽结束不当作点击
+      if (mode === 'edit' && handleLinkClick(n.id)) return;           // 连线模式：点击 = 选端点
       el.querySelectorAll('.node').forEach(x => x.classList.remove('st-sel'));
       div.classList.add('st-sel');
       onNodeClick(n, mode);
@@ -754,6 +766,7 @@ function updateEdge(canvas, rec) {
   }
   rec.chip.style.left = ((g.x1 + g.x2) / 2 - 60) + 'px';
   rec.chip.style.top = ((g.y1 + g.y2) / 2 - 12) + 'px';
+  if (rec.del) { rec.del.style.left = ((g.x1 + g.x2) / 2 - 8) + 'px'; rec.del.style.top = ((g.y1 + g.y2) / 2 + 12) + 'px'; }
 }
 function updateEdgesFor(canvas, id) {
   for (const rec of canvas.edges) if (rec.from === id || rec.to === id) updateEdge(canvas, rec);
@@ -1024,6 +1037,195 @@ function renderBuildCanvas() {
   state.canvasMode = 'edit';
   if (state.draft) renderCanvas($('#buildCanvas'), state.draft, 'edit');
 }
+
+/* ── 搭建器：画布手动编辑（添加接口 / 删除节点 / 连线 / 删线）──
+   所有结构性改动直接改 state.draft，防抖后自动保存草稿；
+   结构变了旧 dry-run 结果不再可信，保存时把 ② 重置为未执行。 */
+function blankDraft() {
+  const id = 'flow_manual_' + Math.random().toString(36).slice(2, 8);
+  return {
+    id, name: '手动新建流程', version: 0,
+    input: { schema: { type: 'object' }, sample: {} },
+    nodes: [{ id: 'start', type: 'start', name: '开始', config: {} }],
+    edges: [], layout: { start: { x: 40, y: 260 } },
+    gates: { schema: { ok: null, errors: [], warnings: [] }, dryRun: { ok: null }, confirm: { ok: null } },
+  };
+}
+function saveCanvasDraft() {
+  if (!state.draftFlowId || !state.draft) return;
+  clearTimeout(saveCanvasDraft._t);
+  saveCanvasDraft._t = setTimeout(async () => {
+    state.draft.gates = state.draft.gates || {};
+    state.draft.gates.dryRun = { ok: null };    // 结构变了，② 必须重跑
+    try {
+      const r = await api(`/api/flows/${state.draftFlowId}/draft`, { method: 'POST', body: JSON.stringify({ def: state.draft }) });
+      if (r.gates) state.draft.gates.schema = r.gates.schema;
+      renderGates();
+      const errs = r.gates && r.gates.schema && r.gates.schema.errors;
+      $('#buildNote').textContent = errs && errs.length ? '已保存，但 Schema 有问题：' + errs.join('；') : '✓ 画布改动已自动保存';
+    } catch (e) { $('#buildNote').textContent = '⚠ 自动保存失败：' + e.message; }
+  }, 600);
+}
+$('#btnNewBlank').onclick = async () => {
+  state.draft = blankDraft();
+  state.draftFlowId = state.draft.id;
+  try { await api(`/api/flows/${state.draftFlowId}/draft`, { method: 'POST', body: JSON.stringify({ def: state.draft }) }); } catch {}
+  switchTab('build');
+  renderBuildCanvas(); renderGates();
+  $('#nodeForm').innerHTML = '<span class="note">点击画布节点进行编辑</span>';
+  addChat('agent', '已创建空白流程。点「＋ 添加接口」加第一步，节点之间用「⇄ 连线」或直接拖不动时点节点右侧按钮连接。');
+};
+function nodeName(id) {
+  const n = state.draft && state.draft.nodes.find(x => x.id === id);
+  return n ? n.name : id;
+}
+
+/* ── 添加接口节点 ── */
+$('#btnAddNode').onclick = () => {
+  if (!state.catalog) return alert('接口目录还没加载好，稍等一下再试');
+  $('#opPickModal').classList.remove('hidden');
+  $('#opPickSearch').value = '';
+  renderOpPick('');
+  $('#opPickSearch').focus();
+};
+$('#opPickSearch').addEventListener('input', e => renderOpPick(e.target.value));
+function renderOpPick(q) {
+  const kw = (q || '').trim().toLowerCase();
+  const ops = (state.catalog.operations || []).filter(o =>
+    !kw || [o.name, o.path, o.id, ...(o.keywords || [])].join(' ').toLowerCase().includes(kw));
+  $('#opPickList').innerHTML = ops.length ? ops.map(o => `
+    <div class="srccard" style="cursor:pointer;margin-bottom:8px" onclick="pickOperation('${o.id}')">
+      <div class="h"><span class="vtag">${esc(o.method || 'GET')}</span>${esc(o.name)}<span style="flex:1"></span><span class="m">${esc((o.baseUrl || '') + (o.path || ''))}</span></div>
+      <div class="m">${esc(o.description || '')}${o.readOnly === false ? ' · <b style="color:var(--amber)">写操作（已预置幂等键）</b>' : ''} · 参数：${esc((o.params || []).join(', ') || '无')}</div>
+    </div>`).join('')
+    : '<div class="empty">没有匹配的接口。可以先到「接口」页接入 OpenAPI / 导入 SDK，再回来添加。</div>';
+}
+function pickOperation(opId) {
+  const op = (state.catalog.operations || []).find(o => o.id === opId);
+  if (!op) return;
+  $('#opPickModal').classList.add('hidden');
+  if (!state.draft) {          // 还没有草稿：先给一个带开始节点的骨架，让「手搭」有起点
+    state.draft = blankDraft();
+    state.draftFlowId = state.draft.id;
+    api(`/api/flows/${state.draftFlowId}/draft`, { method: 'POST', body: JSON.stringify({ def: state.draft }) }).catch(() => {});
+  }
+  const d = state.draft;
+  let nid = 'n_' + String(op.id).replace(/[^\w]/g, '_');
+  let i = 2;
+  const ids = new Set(d.nodes.map(x => x.id));
+  while (ids.has(nid)) nid = `n_${String(op.id).replace(/[^\w]/g, '_')}_${i++}`;
+  const node = {
+    id: nid, type: 'http', name: op.name, operationId: op.id, apiVersion: op.version,
+    config: { method: (op.method || 'GET').toUpperCase(), url: (op.baseUrl || '') + (op.path || '') },
+    retry: { maxAttempts: 1, backoffMs: 300 },
+  };
+  if (op.readOnly === false) node.idempotencyKey = '{{run.num}}-' + nid;   // 与自然语言生成的写操作保持一致
+  d.nodes.push(node);
+  // 布局：接在当前链尾（出度为 0 的节点）右边；条件节点有分支语义，不当链尾
+  const outDeg = {};
+  for (const e of d.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
+  const tail = d.nodes.filter(x => x.id !== nid && x.type !== 'condition' && !(outDeg[x.id] > 0)).pop();
+  const start = d.nodes.find(x => x.id === 'start');
+  const anchor = tail || start;
+  const ax = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).x : 40;
+  const ay = anchor ? ((d.layout && d.layout[anchor.id]) || { x: 40, y: 260 }).y : 260;
+  d.layout = d.layout || {};
+  d.layout[nid] = { x: ax + (anchor ? nodeWidth(anchor) + 90 : 440), y: ay };
+  // 自动把新节点接到链尾；没有链尾（如空流程只有 start）就从 start 连出
+  if (tail) addEdge(tail.id, nid, true);
+  else if (start) addEdge('start', nid, true);
+  renderBuildCanvas();
+  saveCanvasDraft();
+  if (op.params && op.params.length) {
+    const miss = op.params.filter(p => !d.nodes.find(x => x.id === nid).config.url.includes('{' + p + '}'));
+    if (miss.length) toast(`接口「${op.name}」需要参数：${miss.join(', ')} —— 点开节点在 URL 里填值或写 {{input.x}}`, 'bad');
+    else toast(`已添加「${op.name}」，URL 里的 {${op.params.join('}/{')}} 占位符要替换成实际值`);
+  } else {
+    toast(`已添加「${op.name}」${tail ? '，并接到 ' + tail.name : ''}`);
+  }
+  onNodeClick(node, 'edit');   // 直接打开属性面板，引导补参数
+  const el = $('#buildCanvas').querySelector(`[data-node="${nid}"]`);
+  if (el) el.classList.add('st-sel');
+}
+
+/* ── 删除节点 / 连线 ── */
+function removeNode(id) {
+  const d = state.draft;
+  if (!d) return;
+  const n = d.nodes.find(x => x.id === id);
+  if (!n) return;
+  if (n.type === 'start') return toast('开始节点不能删除', 'bad');
+  let refs = 0;
+  const re = new RegExp('nodes\\.' + id + '\\.', 'g');
+  for (const x of d.nodes) refs += (JSON.stringify(x.config || {}).match(re) || []).length;
+  const msg = refs
+    ? `删除「${n.name}」？\n\n注意：${refs} 处下游配置引用了它的输出（{{nodes.${id}…}}），删除后这些引用会失效，需要手动调整。`
+    : `删除节点「${n.name}」及其相关连线？`;
+  if (!confirm(msg)) return;
+  d.nodes = d.nodes.filter(x => x.id !== id);
+  d.edges = (d.edges || []).filter(e => e.from !== id && e.to !== id);
+  if (d.layout) delete d.layout[id];
+  if (state.selNode && state.selNode.id === id) {
+    state.selNode = null;
+    $('#nodeForm').innerHTML = '<span class="note">点击画布节点进行编辑</span>';
+  }
+  renderBuildCanvas();
+  saveCanvasDraft();
+  toast(`已删除「${n.name}」`);
+}
+function removeEdge(from, to) {
+  const d = state.draft;
+  if (!d) return;
+  d.edges = (d.edges || []).filter(e => !(e.from === from && e.to === to));
+  renderBuildCanvas();
+  saveCanvasDraft();
+  toast(`已移除连线 ${nodeName(from)} → ${nodeName(to)}`);
+}
+
+/* ── 连线模式：点起点 → 点终点 ── */
+function addEdge(from, to, silent) {
+  const d = state.draft;
+  if (from === to) { if (!silent) toast('不能把节点连到自己', 'bad'); return false; }
+  if ((d.edges || []).some(e => e.from === from && e.to === to)) { if (!silent) toast('这条连线已经存在', 'bad'); return false; }
+  const src = d.nodes.find(x => x.id === from);
+  const edge = { from, to };
+  if (src && src.type === 'condition') {          // 条件节点的出边带分支标记，最多两条
+    const outs = (d.edges || []).filter(e => e.from === from);
+    if (outs.length >= 2) { if (!silent) toast('条件节点最多两个分支（then / else 都已占用）', 'bad'); return false; }
+    edge.label = outs.length === 0 ? 'then' : 'else';
+    if (!silent) toast(`条件分支自动标记为 ${edge.label}`);
+  }
+  (d.edges = d.edges || []).push(edge);
+  if (!silent) { saveCanvasDraft(); toast(`已连接 ${nodeName(from)} → ${nodeName(to)}`); }
+  return true;
+}
+$('#btnLinkMode').onclick = () => setLinkMode(state.linkMode ? null : { from: null });
+function setLinkMode(v) {
+  state.linkMode = v;
+  $('#btnLinkMode').classList.toggle('primary', !!v);
+  $('#buildCanvas').classList.toggle('linking', !!v);
+  const h = $('#canvasHint');
+  if (!v) { h.textContent = ''; return; }
+  h.textContent = v.from ? `从「${nodeName(v.from)}」出发 —— 点击目标节点完成连线（Esc 取消）` : '连线模式：点击起点节点（Esc 取消）';
+}
+function handleLinkClick(nodeId) {
+  if (!state.linkMode) return false;
+  if (!state.linkMode.from) {
+    state.linkMode.from = nodeId;
+    const el = $('#buildCanvas').querySelector(`[data-node="${nodeId}"]`);
+    if (el) el.classList.add('link-from');
+    setLinkMode({ from: nodeId });
+    return true;
+  }
+  const from = state.linkMode.from;
+  setLinkMode(null);
+  const ok = addEdge(from, nodeId);
+  renderBuildCanvas();
+  return true;    // 连线模式下点击不再打开属性面板
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state.linkMode) setLinkMode(null);
+});
 /* ── 搭建器：流程级认证（调试 / 运行共用同一 authId 解析） ── */
 const credModeLabel = m => m === 'ecloud' ? '移动云 V2.0 签名' : m === 'header' ? '头直传' : 'HMAC 签名';
 async function ensureCreds() {           // 搭建器页也需要凭证列表（流程列表页之外进入时兜底加载）
@@ -1121,6 +1323,7 @@ function onNodeClick(n, mode) {
       <b>名称</b><input id="f-name" value="${esc(n.name)}">
       <b>方法</b><select id="f-method">${['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].map(m => `<option ${m === n.config.method.toUpperCase() ? 'selected' : ''}>${m}</option>`).join('')}</select>
       <b>URL</b><input id="f-url" value="${esc(n.config.url)}">
+      <b>Body（JSON，GET 可空）</b><textarea id="f-body" rows="4" placeholder='{"id": "{{input.orderId}}"}'>${esc(n.config.body != null ? JSON.stringify(n.config.body, null, 1) : '')}</textarea>
       <b>重试次数</b><input id="f-retry" type="number" min="1" max="10" value="${n.retry ? n.retry.maxAttempts : 1}">
       <b>退避(ms)</b><input id="f-backoff" type="number" value="${n.retry ? n.retry.backoffMs : 300}">
       <b>幂等键</b><input id="f-idem" value="${esc(n.idempotencyKey || '')}" placeholder="写操作建议配置">
@@ -1128,7 +1331,7 @@ function onNodeClick(n, mode) {
       <b>断言·状态码</b><input id="f-ast-status" value="${esc(((n.assert && n.assert.status) || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">
       <b>断言·输出字段</b><input id="f-ast-fields" value="${esc(((n.assert && n.assert.outputHas) || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
       <b>断言·表达式</b><input id="f-ast-expr" value="${esc((n.assert && n.assert.expr) || '')}" placeholder="如 score >= 60（可空）">
-      <span class="note">断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
+      <span class="note">URL 与 Body 里可写 {{input.x}}（流程输入）或 {{nodes.节点id.output.字段}}（上游输出）；query 参数直接拼在 URL 上（如 ?poolId=1&pageNo=1）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
   } else if (n.type === 'condition') {
     f.innerHTML = `<b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != > < >= <= includes，左值为上游输出字段</span>`;
   } else { f.innerHTML = `<b>名称</b><input id="f-name" value="${esc(n.name)}"><span class="note">${n.type} 节点暂无更多可编辑属性</span>`; }
@@ -1142,6 +1345,11 @@ function onNodeClick(n, mode) {
   f.oninput = () => {
     if ($('#f-name')) n.name = $('#f-name').value;
     if ($('#f-method')) { n.config.method = $('#f-method').value; n.retry = { maxAttempts: +$('#f-retry').value || 1, backoffMs: +$('#f-backoff').value || 300 }; n.idempotencyKey = $('#f-idem').value || undefined; n.timeout = +$('#f-timeout').value || 10000; }
+    if ($('#f-body')) {   // Body 必须是合法 JSON 才写入；清空即移除（非法输入保留旧值，不打断输入）
+      const raw = $('#f-body').value.trim();
+      if (!raw) delete n.config.body;
+      else { try { n.config.body = JSON.parse(raw); } catch { /* 等输入合法再写入 */ } }
+    }
     if ($('#f-expr')) n.config.expr = $('#f-expr').value;
     if ($('#f-ast-status')) {   // 断言编辑：三项全空 = 移除断言
       const st = $('#f-ast-status').value.split(',').map(x => parseInt(x.trim(), 10)).filter(x => !isNaN(x));

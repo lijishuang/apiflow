@@ -176,7 +176,15 @@
   </div>
   <div class="vsplit" data-split="chat" role="separator" aria-orientation="vertical" tabindex="0" title="拖动调整左侧面板宽度（双击复位）"></div>
   <div class="builder-main">
-    <div class="canvas-wrap"><div class="canvas" id="buildCanvas"></div></div>
+    <div class="canvas-wrap" style="position:relative">
+      <div class="canvas-tools" id="canvasTools">
+        <button class="btn" id="btnAddNode" title="从接口目录挑一个接口，添加为流程节点">＋ 添加接口</button>
+        <button class="btn" id="btnLinkMode" title="进入连线模式：先点起点节点，再点目标节点">⇄ 连线</button>
+        <button class="btn" id="btnNewBlank" title="从空白流程开始手动搭建（自动带开始节点）">Blank 新建空白</button>
+        <span class="note" id="canvasHint"></span>
+      </div>
+      <div class="canvas" id="buildCanvas"></div>
+    </div>
     <div class="vsplit" data-split="drawer" role="separator" aria-orientation="vertical" tabindex="0" title="拖动调整右侧面板宽度（双击复位）"></div>
     <aside class="drawer" id="buildDrawer">
       <h4>三道闸</h4>
@@ -315,6 +323,15 @@
   <div class="modal-box" style="width:720px">
     <div class="modal-head"><b id="flowTitle">数据流动</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('flowModal').classList.add('hidden')">关闭</button></div>
     <div id="flowBody" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- 接口选择器（画布手动添加节点用） -->
+<div class="modal hidden" id="opPickModal">
+  <div class="modal-box" style="width:640px;max-height:78vh;display:flex;flex-direction:column">
+    <div class="modal-head"><b>添加接口节点</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('opPickModal').classList.add('hidden')">关闭</button></div>
+    <div style="padding:10px 14px 0"><input id="opPickSearch" class="sel" style="width:100%" placeholder="搜索接口名 / 路径 / 关键词…"></div>
+    <div class="modal-body" id="opPickList" style="overflow:auto"></div>
   </div>
 </div>
 
