@@ -825,7 +825,7 @@ function renderCanvas(el, def, mode, runState) {
     chip.onclick = () => { if (chip.dataset.full) showDataFlow(e.from, e.to, chip.dataset.full); };
     el.appendChild(chip);
 
-    rec = { from: e.from, to: e.to, path, label, chip };
+    rec = { from: e.from, to: e.to, path, label, chip, map: (e.map && Object.keys(e.map).length) ? e.map : null };
     // 编辑模式下，边中点放一个小 ✕：点一下就删掉这条连线
     if (mode === 'edit') {
       const del = document.createElement('div');
@@ -834,6 +834,25 @@ function renderCanvas(el, def, mode, runState) {
       del.onclick = ev => { ev.stopPropagation(); removeEdge(e.from, e.to); };
       el.appendChild(del);
       rec.del = del;
+      // 已配置数据映射：边中点上方挂 ⚡ 徽标，点击编辑
+      if (rec.map) {
+        const mb = document.createElement('div');
+        mb.className = 'edge-mapbadge'; mb.textContent = '⚡' + Object.keys(rec.map).length;
+        mb.title = '已配置数据映射（' + Object.keys(rec.map).join(', ') + '）—— 点击编辑';
+        mb.onclick = ev => { ev.stopPropagation(); openEdgeMap(e.from, e.to); };
+        el.appendChild(mb);
+        rec.mapBadge = mb;
+      }
+      // 透明热区：加粗的隐形路径盖在连线上，点线即可编辑传递的数据
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      hit.setAttribute('class', 'edge-hit');
+      hit.setAttribute('stroke-width', '14');
+      hit.setAttribute('fill', 'none');
+      hit.style.cursor = 'pointer';
+      hit.title = '点击编辑这条边传递的数据';
+      hit.onclick = ev => { ev.stopPropagation(); openEdgeMap(e.from, e.to); };
+      svg.appendChild(hit);
+      rec.hit = hit;
     }
     canvas.edges.push(rec);
     canvas.edgeEls[e.from + '->' + e.to] = path;
@@ -944,6 +963,7 @@ function updateEdge(canvas, rec) {
   if (!a || !b) return;
   const g = edgeGeometry(a, b);
   rec.path.setAttribute('d', g.d);
+  if (rec.hit) rec.hit.setAttribute('d', g.d);
   if (rec.label) {
     rec.label.setAttribute('x', (g.x1 + g.x2) / 2);
     rec.label.setAttribute('y', (g.y1 + g.y2) / 2 - 6);
@@ -953,6 +973,7 @@ function updateEdge(canvas, rec) {
     rec.chip.style.top = ((g.y1 + g.y2) / 2 - 12) + 'px';
   }
   if (rec.del) { rec.del.style.left = ((g.x1 + g.x2) / 2 - 8) + 'px'; rec.del.style.top = ((g.y1 + g.y2) / 2 + 12) + 'px'; }
+  if (rec.mapBadge) { rec.mapBadge.style.left = ((g.x1 + g.x2) / 2 - 14) + 'px'; rec.mapBadge.style.top = ((g.y1 + g.y2) / 2 - 30) + 'px'; }
 }
 function updateEdgesFor(canvas, id) {
   for (const rec of canvas.edges) if (rec.from === id || rec.to === id) updateEdge(canvas, rec);
@@ -1226,6 +1247,94 @@ function renderBuildCanvas() {
   state.canvasMode = 'edit';
   if (state.draft) renderCanvas($('#buildCanvas'), state.draft, 'edit');
 }
+
+/* ── 边数据映射编辑：连线代表数据传递，点线上即可编辑传什么 ──
+   edge.map = { 目标字段: 来源表达式 }；引擎把映射结果作为下游的输入（{{input.字段}} 引用），
+   不配置则整包传递上游输出（下游用 {{nodes.上游.output.*}} 引用）。 */
+let edgeEdit = null;   // 当前编辑的边 {from, to}
+function openEdgeMap(from, to) {
+  if (!state.draft) return;
+  const edge = (state.draft.edges || []).find(e => e.from === from && e.to === to);
+  if (!edge) return;
+  edgeEdit = { from, to };
+  const upstream = state.draft.nodes.find(n => n.id === from) || {};
+  const downstream = state.draft.nodes.find(n => n.id === to) || {};
+  $('#edgeTitle').textContent = `传递数据 · ${upstream.name || from} → ${downstream.name || to}${edge.label ? `（${edge.label} 分支）` : ''}`;
+  const hasMap = edge.map && typeof edge.map === 'object' && Object.keys(edge.map).length;
+  setEdgeMode(hasMap ? 'map' : 'raw');
+  $('#edgeMapRows').innerHTML = '';
+  if (hasMap) for (const [k, v] of Object.entries(edge.map)) addEdgeMapRow(k, v);
+  else addEdgeMapRow('', `{{nodes.${from}.output.`);
+  $('#edgeModal').classList.remove('hidden');
+  loadEdgeChips(from);   // 异步补「最近运行输出字段」快捷 chips
+}
+function setEdgeMode(m) {
+  document.querySelectorAll('#edgeMode .btn').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  $('#edgeMode').dataset.m = m;
+  const isMap = m === 'map';
+  $('#edgeMapRows').style.display = isMap ? '' : 'none';
+  $('#edgeMapAdd').style.display = isMap ? '' : 'none';
+  $('#edgeChips').style.display = isMap ? '' : 'none';
+  $('#edgeHint').innerHTML = isMap
+    ? '只把映射过的字段传给下游。下游节点的模板里用 <code>{{input.字段名}}</code> 引用这里传来的数据；来源可以是 <code>{{nodes.节点ID.output.*}}</code> / <code>{{input.*}}</code> / <code>{{run.num}}</code>。'
+    : '上游输出整包传给下游（默认）。下游模板用 <code>{{nodes.上游节点ID.output.*}}</code> 引用。切到「自定义映射」可以只挑几个字段、改名后再传。';
+}
+document.querySelectorAll('#edgeMode .btn').forEach(b => b.onclick = () => {
+  setEdgeMode(b.dataset.m);
+  if (b.dataset.m === 'map' && !$('#edgeMapRows').children.length) addEdgeMapRow('', '');
+});
+function addEdgeMapRow(k, v) {
+  const row = document.createElement('div');
+  row.className = 'em-row';
+  row.innerHTML = `<input class="em-k" placeholder="目标字段名" value="${esc(k)}">
+    <span class="em-arrow">←</span>
+    <input class="em-v mono" placeholder="来源表达式，如 {{nodes.start.output.id}}">
+    <button class="em-del" title="删除这行">✕</button>`;
+  row.querySelector('.em-v').value = v;
+  row.querySelector('.em-del').onclick = () => row.remove();
+  $('#edgeMapRows').appendChild(row);
+}
+$('#edgeMapAdd').onclick = () => { addEdgeMapRow('', ''); const rows = $('#edgeMapRows'); rows.lastChild.querySelector('.em-k').focus(); };
+async function loadEdgeChips(from) {
+  const box = $('#edgeChips');
+  box.innerHTML = '<span class="note">最近一次运行的上游输出字段加载中…</span>';
+  let fields = null;
+  try {
+    const runs = await api('/api/runs?flowId=' + state.draftFlowId);
+    const hit = runs.find(r => r.nodes && r.nodes[from] && r.nodes[from].output != null);
+    if (hit) fields = Object.keys(hit.nodes[from].output || {});
+  } catch { /* 拿不到就不显示 chips */ }
+  if (edgeEdit && edgeEdit.from === from) {
+    box.innerHTML = fields && fields.length
+      ? `<p class="ph-label" style="margin-bottom:6px">从最近输出的字段快速填入</p>` +
+        fields.slice(0, 12).map(f => `<span class="qchip" data-f="${esc(f)}">${esc(f)}</span>`).join(' ')
+      : fields ? '<span class="note">最近一次运行的上游输出是空对象，没有可挑的字段。</span>'
+      : '<span class="note">还没找到这个节点的历史输出 —— 先跑一次（或 Dry-run），这里就能直接挑字段。</span>';
+    box.querySelectorAll('.qchip').forEach(c => c.onclick = () => addEdgeMapRow(c.dataset.f, `{{nodes.${from}.output.${c.dataset.f}}}`));
+  }
+}
+$('#edgeSave').onclick = () => {
+  if (!edgeEdit) return;
+  const edge = (state.draft.edges || []).find(e => e.from === edgeEdit.from && e.to === edgeEdit.to);
+  if (!edge) return;
+  if ($('#edgeMode').dataset.m !== 'map') delete edge.map;
+  else {
+    const map = {};
+    for (const row of document.querySelectorAll('#edgeMapRows .em-row')) {
+      const k = row.querySelector('.em-k').value.trim();
+      const v = row.querySelector('.em-v').value;
+      if (k) map[k] = v;
+    }
+    if (!Object.keys(map).length) { delete edge.map; toast('映射为空，已按整包传递保存'); }
+    else edge.map = map;
+  }
+  $('#edgeModal').classList.add('hidden');
+  edgeEdit = null;
+  saveCanvasDraft();
+  renderBuildCanvas();   // 重绘：⚡ 徽标即时出现/消失
+  $('#buildNote').textContent = '✓ 连线数据已更新（结构变化，Dry-run 闸已重置，发布前记得重跑）';
+};
+$('#edgeCancel').onclick = () => { $('#edgeModal').classList.add('hidden'); edgeEdit = null; };
 
 /* ── 搭建器：画布手动编辑（添加接口 / 删除节点 / 连线 / 删线）──
    所有结构性改动直接改 state.draft，防抖后自动保存草稿；
@@ -1577,7 +1686,7 @@ function onNodeClick(n, mode) {  state.selNode = n;
       <b>状态码</b><input id="f-ast-status" value="${esc(((n.assert && n.assert.status) || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">
       <b>输出字段</b><input id="f-ast-fields" value="${esc(((n.assert && n.assert.outputHas) || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
       <b>表达式</b><input id="f-ast-expr" value="${esc((n.assert && n.assert.expr) || '')}" placeholder="如 score >= 60（可空）">
-      <span class="note">URL / Query / Body 里都可写 {{input.x}}（流程输入）或 {{nodes.节点id.output.字段}}（上游输出）。Query 参数会合并进 URL；如果 URL 里已经手写了同名参数，以 URL 里的为准（不重复追加）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
+      <span class="note">URL / Query / Body 里都可写 {{input.x}} 或 {{nodes.节点id.output.字段}}。<b>{{input.x}} 取的是「传进这个节点的数据」</b>—— 上游连线整包传递时是流程输入；连线上配置了数据映射（点连线编辑）时是映射结果。Query 参数会合并进 URL；如果 URL 里已经手写了同名参数，以 URL 里的为准（不重复追加）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
   } else if (n.type === 'condition') {
     f.innerHTML = `<span class="kv-sec">条件</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != &gt; &lt; &gt;= &lt;= includes，左值为上游输出字段</span>`;
   } else { f.innerHTML = `<span class="kv-sec">节点</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><span class="note">${n.type} 节点暂无更多可编辑属性</span>`; }
@@ -2051,7 +2160,7 @@ function fmtEvent(p) {
   if (p.event === 'node_start') return `<div><span class="t">${t}</span>  <span class="ev">node_start</span>  ${esc(d.node)} <span class="warn">${esc(d.type)}</span></div>`;
   if (p.event === 'node_end') return `<div><span class="t">${t}</span>  <span class="ev">node_end</span>    ${esc(d.node)}   <span class="${d.status === 'done' ? 'ok' : 'bad'}">${esc(d.status)} ${d.ms ? d.ms + 'ms' : ''}</span> ${d.error ? '<span class="bad">' + esc(d.error) + '</span>' : ''}</div>`;
   if (p.event === 'node_retry') return `<div><span class="t">${t}</span>  <span class="ev">node_retry</span>  ${esc(d.node)} <span class="warn">第 ${d.attempt}/${d.of} 次</span></div>`;
-  if (p.event === 'edge_data') return `<div><span class="t">${t}</span>  <span class="ev">edge_data</span>   ${esc(d.from)} → ${esc(d.to)}   <span class="data">${esc(d.data)}</span></div>`;
+  if (p.event === 'edge_data') return `<div><span class="t">${t}</span>  <span class="ev">edge_data</span>   ${esc(d.from)} → ${esc(d.to)}   ${d.mapped ? '<span class="warn">⚡映射</span> ' : ''}<span class="data">${esc(d.data)}</span></div>`;
   if (p.event === 'edge_skip') return `<div><span class="t">${t}</span>  <span class="t">edge_skip</span>   ${esc(d.from)} → ${esc(d.to)} (${esc(d.label || '')} 未命中)</div>`;
   if (p.event === 'error') return `<div><span class="t">${t}</span>  <span class="bad">error</span>        ${esc(d.node)} ${esc(d.error)}</div>`;
   if (p.event === 'assert_fail') return `<div><span class="t">${t}</span>  <span class="bad">assert_fail</span> ${esc(d.node === '__end__' ? '结束断言' : d.node)} <span class="bad">${esc((d.fails || []).join('；'))}</span></div>`;
@@ -2113,7 +2222,7 @@ function connectSSE() {
           paintRunState($('#buildCanvas'), state.draft, state.debugRun);
           if (p.event === 'edge_data') {   // 中间数据流：边 chip 显示流动数据，点击可看字段溯源
             const chip = $('#buildCanvas').querySelector(`[data-edge="${p.data.from}->${p.data.to}"]`);
-            if (chip) { chip.style.display = 'block'; chip.textContent = p.data.data; chip.dataset.full = p.data.data; }
+            if (chip) { chip.style.display = 'block'; chip.textContent = (p.data.mapped ? '\u26a1' : '') + p.data.data; chip.dataset.full = p.data.data; }
           }
         }
         return;   // 调试 run 不进运行观测画布
@@ -2146,7 +2255,7 @@ function connectSSE() {
       if (p.event === 'edge_data') {
         const chip = $('#runCanvas').querySelector(`[data-edge="${p.data.from}->${p.data.to}"]`);
         const edge = state.edgeEls && state.edgeEls[p.data.from + '->' + p.data.to];
-        if (chip) { chip.style.display = 'block'; chip.textContent = p.data.data; chip.dataset.full = p.data.data; }
+        if (chip) { chip.style.display = 'block'; chip.textContent = (p.data.mapped ? '\u26a1' : '') + p.data.data; chip.dataset.full = p.data.data; }
         if (edge) { edge.classList.add('eflow'); edge.style.stroke = EDGE_FLOW; setTimeout(() => { edge.classList.remove('eflow'); edge.style.stroke = ''; }, 4000); }
       }
       if (p.event === 'node_end' && (p.data.status === 'done' || p.data.status === 'reused')) showRunDrawer(p.data.node, run);

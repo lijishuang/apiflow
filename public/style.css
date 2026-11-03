@@ -754,3 +754,22 @@ tbody tr:hover{background:var(--bg2)}
 .fp-dot{width:8px;height:8px;border-radius:50%;background:var(--blue);animation:fp-blink 1s ease-in-out infinite;flex-shrink:0}
 @keyframes fp-blink{0%,100%{opacity:1}50%{opacity:.25}}
 .fp-live .btn{font-size:11.5px;padding:2px 8px;border-radius:6px;margin-left:auto}
+
+/* ───────── 边数据映射（连线可点击编辑传递的数据） ───────── */
+.edge-hit{stroke:transparent;pointer-events:stroke}   /* 透明笔画也要接住点击 */
+.edge-hit:hover{stroke:rgba(47,191,143,.18)}
+.edge-mapbadge{position:absolute;z-index:5;background:var(--ok-bg);color:var(--ok);border:1px solid var(--line-soft);border-radius:99px;font-size:10.5px;padding:1px 6px;cursor:pointer;white-space:nowrap}
+.edge-mapbadge:hover{border-color:var(--ok)}
+.edge-mode{display:flex;gap:6px}
+.edge-mode .btn{opacity:.55}
+.edge-mode .btn.on{opacity:1;border-color:var(--ok);color:var(--ok)}
+.em-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.em-row input{flex:1;min-width:0;background:var(--bg0);border:1px solid var(--line-soft);border-radius:7px;color:var(--ink);font-size:12.5px;padding:6px 8px}
+.em-row input.mono{font-family:var(--font-mono);font-size:11.5px}
+.em-row input:focus{outline:none;border-color:var(--ok)}
+.em-row .em-k{flex:0 0 34%}
+.em-arrow{color:var(--muted);flex:none}
+.em-row .em-del{flex:none;background:none;border:none;color:var(--muted);cursor:pointer;padding:4px}
+.em-row .em-del:hover{color:var(--bad)}
+#edgeChips .qchip{margin:0 6px 6px 0}
+#edgeChips .qchip:hover{border-color:var(--ok);color:var(--ok)}

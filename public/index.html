@@ -354,6 +354,27 @@
   </div>
 </div>
 
+<!-- 边数据映射编辑（连线代表数据传递，线上可编辑传什么） -->
+<div class="modal hidden" id="edgeModal">
+  <div class="modal-box" style="width:600px;max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-head"><b id="edgeTitle">编辑传递数据</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('edgeModal').classList.add('hidden')">关闭</button></div>
+    <div class="modal-body" style="overflow:auto">
+      <div id="edgeMode" class="edge-mode">
+        <button class="btn mini on" data-m="raw">整包传递</button>
+        <button class="btn mini" data-m="map">自定义映射</button>
+      </div>
+      <p class="note" id="edgeHint" style="margin:8px 0 0"></p>
+      <div id="edgeMapRows" style="margin-top:10px"></div>
+      <button class="btn wide dashed" id="edgeMapAdd" style="margin-top:6px">＋添加字段</button>
+      <div id="edgeChips" style="margin-top:10px"></div>
+    </div>
+    <div class="modal-foot" style="padding:0 18px 14px">
+      <button class="btn" id="edgeCancel">取消</button>
+      <button class="btn primary" id="edgeSave">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ 界面 5：版本更新记录 ═══ -->
 <section id="s-news" class="screen news">
   <div class="page-head">

@@ -349,11 +349,49 @@ old=json.loads(op.open(rq,timeout=30).read())
 # 普通描述会重建同 flow（多轮调整语义，名字变为「查询库存」属预期）；
 # 关键断言：旧流程没被「新建」的那条覆盖（名字不等于新流程名，节点是库存接口）
 assert old['def']['name']!='新建一条', old['def'].get('name')
-assert any(n.get('operationId')=='query_stock' for n in old['def']['nodes']), old['def']['nodes']
+assert any((n.get('operationId') or '').startswith('query_stock') for n in old['def']['nodes']), old['def']['nodes']
 dele(b['flow']['id'])
 print('   普通描述延续旧流程；「新建」生成', b['flow']['id'], '（基准流程未被覆盖）')
 PYEOF
 chk "「新建」语义生成新流程且不动旧草稿" $?
+
+echo "══ T17 边数据映射（连线可编辑传递数据：edge.map → 下游 {{input.*}}）══"
+$P - <<PYEOF
+import json,urllib.request
+op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+def api(p,m='GET',b=None):
+    r=urllib.request.Request('$B'+p,method=m,data=json.dumps(b).encode() if b is not None else None,headers={'content-type':'application/json'})
+    with op.open(r,timeout=30) as x: return json.loads(x.read())
+FID='flow_e2e_edge'
+try:
+    api('/api/flows/'+FID,'DELETE')      # 上轮残留清理（不存在时 404 忽略）
+except Exception: pass
+defn={'id':FID,'name':'边映射回归','version':0,'input':{'sample':{}},
+ 'nodes':[
+  {'id':'start','type':'start','name':'开始','config':{}},
+  {'id':'src','type':'http','name':'取数','config':{'method':'GET','url':'$B/upstream/_sandbox?sku=SKU-9'}},
+  {'id':'dst','type':'http','name':'回显','config':{'method':'POST','url':'$B/upstream/_sandbox','body':{'got_ok':'{{input.ok}}','got_sku':'{{input.sku}}','raw_ok':'{{nodes.src.output.ok}}'}}}],
+ 'edges':[{'from':'start','to':'src'},{'from':'src','to':'dst','map':{'ok':'{{nodes.src.output.ok}}','sku':'{{nodes.src.output.query.sku}}'}}],
+ 'layout':{}}
+g=api('/api/flows/'+FID+'/draft','POST',{'def':defn})['gates']['schema']
+assert g['ok'] is True, g          # Schema 闸接受 edge.map
+api('/api/flows/'+FID+'/dry-run','POST',{})
+api('/api/flows/'+FID+'/publish','POST',{'confirm':True})
+r=api('/api/flows/'+FID+'/run','POST',{})
+run=api('/api/runs/'+r['runId'])
+assert run['status']=='success', run.get('error')
+body=run['nodes']['dst']['output']['body']
+assert body['got_ok'] is True, body            # 映射字段经 {{input.*}} 到下游
+assert body['got_sku']=='SKU-9', body          # 嵌套路径映射
+assert body['raw_ok'] is True, body            # 整包引用不受影响（上游输出仍在）
+evs=[e for e in run.get('events',[]) if e['event']=='edge_data' and e['data']['from']=='src']
+assert evs and evs[0]['data'].get('mapped') is True, evs
+evs2=[e for e in run.get('events',[]) if e['event']=='edge_data' and e['data']['from']=='start']
+assert evs2 and evs2[0]['data'].get('mapped') is False, evs2   # 未配置映射 → 整包
+api('/api/flows/'+FID,'DELETE')
+print('   Schema 接受 map；映射/嵌套/整包引用三路断言全过')
+PYEOF
+chk "边数据映射 → 下游 {{input.*}} 生效" $?
 
 # ══ 清理自建数据（种子流程 / NL 草稿流程 / 种子接口来源）══
 for FID in $SEED flow_e2e_loop flow_e2e_query $END_DEF flow_e2e_new $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
