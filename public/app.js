@@ -1320,25 +1320,28 @@ function onNodeClick(n, mode) {
   const f = $('#nodeForm');
   if (n.type === 'http') {
     f.innerHTML = `
+      <span class="kv-sec">请求</span>
       <b>名称</b><input id="f-name" value="${esc(n.name)}">
       <b>方法</b><select id="f-method">${['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].map(m => `<option ${m === n.config.method.toUpperCase() ? 'selected' : ''}>${m}</option>`).join('')}</select>
       <b>URL</b><input id="f-url" value="${esc(n.config.url)}">
-      <b>Body（JSON，GET 可空）</b><textarea id="f-body" rows="4" placeholder='{"id": "{{input.orderId}}"}'>${esc(n.config.body != null ? JSON.stringify(n.config.body, null, 1) : '')}</textarea>
+      <b>Body</b><textarea id="f-body" rows="4" placeholder='{"id": "{{input.orderId}}"}'>${esc(n.config.body != null ? JSON.stringify(n.config.body, null, 1) : '')}</textarea>
+      <span class="kv-sec">执行策略</span>
       <b>重试次数</b><input id="f-retry" type="number" min="1" max="10" value="${n.retry ? n.retry.maxAttempts : 1}">
       <b>退避(ms)</b><input id="f-backoff" type="number" value="${n.retry ? n.retry.backoffMs : 300}">
       <b>幂等键</b><input id="f-idem" value="${esc(n.idempotencyKey || '')}" placeholder="写操作建议配置">
       <b>超时(ms)</b><input id="f-timeout" type="number" value="${n.timeout || 10000}">
-      <b>断言·状态码</b><input id="f-ast-status" value="${esc(((n.assert && n.assert.status) || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">
-      <b>断言·输出字段</b><input id="f-ast-fields" value="${esc(((n.assert && n.assert.outputHas) || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
-      <b>断言·表达式</b><input id="f-ast-expr" value="${esc((n.assert && n.assert.expr) || '')}" placeholder="如 score >= 60（可空）">
-      <span class="note">URL 与 Body 里可写 {{input.x}}（流程输入）或 {{nodes.节点id.output.字段}}（上游输出）；query 参数直接拼在 URL 上（如 ?poolId=1&pageNo=1）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
+      <span class="kv-sec">断言</span>
+      <b>状态码</b><input id="f-ast-status" value="${esc(((n.assert && n.assert.status) || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">
+      <b>输出字段</b><input id="f-ast-fields" value="${esc(((n.assert && n.assert.outputHas) || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
+      <b>表达式</b><input id="f-ast-expr" value="${esc((n.assert && n.assert.expr) || '')}" placeholder="如 score >= 60（可空）">
+      <span class="note">URL 与 Body 里可写 {{input.x}}（流程输入）或 {{nodes.节点id.output.字段}}（上游输出）；query 参数直接拼在 URL 上（如 ?poolId=1&amp;pageNo=1）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
   } else if (n.type === 'condition') {
-    f.innerHTML = `<b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != > < >= <= includes，左值为上游输出字段</span>`;
-  } else { f.innerHTML = `<b>名称</b><input id="f-name" value="${esc(n.name)}"><span class="note">${n.type} 节点暂无更多可编辑属性</span>`; }
+    f.innerHTML = `<span class="kv-sec">条件</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != &gt; &lt; &gt;= &lt;= includes，左值为上游输出字段</span>`;
+  } else { f.innerHTML = `<span class="kv-sec">节点</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><span class="note">${n.type} 节点暂无更多可编辑属性</span>`; }
   // 调试产物：该节点最近一次调试运行的输出 / 断言失败详情
   const dbg = state.debugRun && state.debugRun.nodes && state.debugRun.nodes[n.id];
   if (dbg && (dbg.output != null || dbg.error)) {
-    f.innerHTML += `<b>调试输出</b><div class="code">${esc(JSON.stringify(dbg.output, null, 1))}</div>` +
+    f.innerHTML += `<span class="kv-sec">调试输出</span><div class="code">${esc(JSON.stringify(dbg.output, null, 1))}</div>` +
       (dbg.error ? `<div class="code" style="background:var(--bad-bg);color:var(--bad)">${esc(dbg.error)}</div>` : '') +
       `<span class="note">来自调试 run ${esc(state.debugRun.id)}</span>`;
   }
