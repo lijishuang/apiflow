@@ -1314,8 +1314,26 @@ $('#btnSend').onclick = sendBuildText;
 $('#chatText').addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendBuildText(); }
 });
-function onNodeClick(n, mode) {
-  state.selNode = n;
+/* ── Query 参数编辑：一行 = 键 + 值，值支持 {{input.x}} / {{nodes.x.output.y}} ── */
+function queryRowHtml(k = '', v = '') {
+  return `<div class="qrow"><input class="qk" placeholder="参数名" value="${esc(k)}"><input class="qv" placeholder="值（可写 {{input.x}}）" value="${esc(v == null ? '' : String(v))}"><button type="button" class="qdel" title="删除这个参数">✕</button></div>`;
+}
+function renderQueryRows(q) {
+  const rows = Object.entries(q || {});
+  return (rows.length ? rows.map(([k, v]) => queryRowHtml(k, v)).join('') : queryRowHtml())
+    + `<button type="button" class="qadd" id="f-query-add" title="新增一行 Query 参数">＋ 添加参数</button>`;
+}
+// 从 DOM 收集（参数名为空的整行忽略；全空返回 {}，调用方据此删掉 config.query）
+function collectQueryRows() {
+  const out = {};
+  document.querySelectorAll('#f-query .qrow').forEach(r => {
+    const k = r.querySelector('.qk').value.trim();
+    const v = r.querySelector('.qv').value;
+    if (k) out[k] = v.trim();
+  });
+  return out;
+}
+function onNodeClick(n, mode) {  state.selNode = n;
   if (mode !== 'edit') { showRunDrawer(n.id); return; }   // 运行观测：打开节点详情抽屉
   const f = $('#nodeForm');
   if (n.type === 'http') {
@@ -1324,6 +1342,7 @@ function onNodeClick(n, mode) {
       <b>名称</b><input id="f-name" value="${esc(n.name)}">
       <b>方法</b><select id="f-method">${['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].map(m => `<option ${m === n.config.method.toUpperCase() ? 'selected' : ''}>${m}</option>`).join('')}</select>
       <b>URL</b><input id="f-url" value="${esc(n.config.url)}">
+      <b>Query</b><div class="qrows" id="f-query">${renderQueryRows(n.config.query)}</div>
       <b>Body</b><textarea id="f-body" rows="4" placeholder='{"id": "{{input.orderId}}"}'>${esc(n.config.body != null ? JSON.stringify(n.config.body, null, 1) : '')}</textarea>
       <span class="kv-sec">执行策略</span>
       <b>重试次数</b><input id="f-retry" type="number" min="1" max="10" value="${n.retry ? n.retry.maxAttempts : 1}">
@@ -1334,7 +1353,7 @@ function onNodeClick(n, mode) {
       <b>状态码</b><input id="f-ast-status" value="${esc(((n.assert && n.assert.status) || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">
       <b>输出字段</b><input id="f-ast-fields" value="${esc(((n.assert && n.assert.outputHas) || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
       <b>表达式</b><input id="f-ast-expr" value="${esc((n.assert && n.assert.expr) || '')}" placeholder="如 score >= 60（可空）">
-      <span class="note">URL 与 Body 里可写 {{input.x}}（流程输入）或 {{nodes.节点id.output.字段}}（上游输出）；query 参数直接拼在 URL 上（如 ?poolId=1&amp;pageNo=1）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
+      <span class="note">URL / Query / Body 里都可写 {{input.x}}（流程输入）或 {{nodes.节点id.output.字段}}（上游输出）。Query 参数会合并进 URL；如果 URL 里已经手写了同名参数，以 URL 里的为准（不重复追加）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
   } else if (n.type === 'condition') {
     f.innerHTML = `<span class="kv-sec">条件</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != &gt; &lt; &gt;= &lt;= includes，左值为上游输出字段</span>`;
   } else { f.innerHTML = `<span class="kv-sec">节点</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><span class="note">${n.type} 节点暂无更多可编辑属性</span>`; }
@@ -1354,6 +1373,10 @@ function onNodeClick(n, mode) {
       else { try { n.config.body = JSON.parse(raw); } catch { /* 等输入合法再写入 */ } }
     }
     if ($('#f-expr')) n.config.expr = $('#f-expr').value;
+    if ($('#f-query')) {   // Query 参数：空行忽略，全空即移除；参数名重复时后者覆盖前者
+      const q = collectQueryRows();
+      if (Object.keys(q).length) n.config.query = q; else delete n.config.query;
+    }
     if ($('#f-ast-status')) {   // 断言编辑：三项全空 = 移除断言
       const st = $('#f-ast-status').value.split(',').map(x => parseInt(x.trim(), 10)).filter(x => !isNaN(x));
       const fields = $('#f-ast-fields').value.split(',').map(x => x.trim()).filter(Boolean);
@@ -1368,6 +1391,35 @@ function onNodeClick(n, mode) {
     }
     renderBuildCanvas();
     const el = $('#buildCanvas').querySelector(`[data-node="${n.id}"]`); if (el) el.classList.add('st-sel');
+    if ($('#f-query')) saveCanvasDraft();   // Query 行的增删改也要落草稿
+  };
+  // Query 参数行：＋ 追加一行、✕ 删除一行（都对 config.query 生效并立即存草稿）
+  f.onclick = e => {
+    const add = e.target.closest('#f-query-add');
+    const del = e.target.closest('.qdel');
+    if (add) {
+      const wrap = $('#f-query');
+      const btn = wrap.querySelector('#f-query-add');
+      const row = document.createElement('div');
+      row.innerHTML = queryRowHtml();
+      const node = row.firstElementChild;
+      wrap.insertBefore(node, btn);
+      node.querySelector('.qk').focus();
+      return;
+    }
+    if (del) {
+      const row = del.closest('.qrow');
+      const wrap = $('#f-query');
+      row.remove();
+      if (!wrap.querySelector('.qrow')) {   // 删空了留一行空行，面板不塌
+        const t = document.createElement('div');
+        t.innerHTML = queryRowHtml();
+        wrap.insertBefore(t.firstElementChild, wrap.querySelector('#f-query-add'));
+      }
+      const q = collectQueryRows();
+      if (Object.keys(q).length) n.config.query = q; else delete n.config.query;
+      saveCanvasDraft();
+    }
   };
 }
 $('#btnValidate').onclick = async () => {

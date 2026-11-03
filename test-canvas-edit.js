@@ -85,6 +85,33 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   await page.fill('#f-body', '{"score": "{{nodes.' + (await page.locator('#buildCanvas .node').nth(1).getAttribute('data-node')) + '.output.score}}"}');
   await sleep(300);
 
+  console.log('── E4b Query 参数编辑 ──');
+  eq('Query 编辑区存在', true, await page.locator('#f-query').isVisible());
+  eq('默认一行参数', 1, await page.locator('#f-query .qrow').count());
+  await page.click('#f-query-add');
+  eq('点「添加参数」多一行', 2, await page.locator('#f-query .qrow').count());
+  const qnode = await page.evaluate(() => state.selNode.id);
+  await page.locator('#f-query .qrow').first().locator('.qk').fill('poolId');
+  await page.locator('#f-query .qrow').first().locator('.qv').fill('pool-9');
+  await page.locator('#f-query .qrow').nth(1).locator('.qk').fill('pageNo');
+  await page.locator('#f-query .qrow').nth(1).locator('.qv').fill('{{input.page}}');
+  await sleep(1000);   // 等防抖保存
+  const qSaved = await page.evaluate(async id => {
+    const r = await (await fetch('/api/flows/' + state.draftFlowId + '/def')).json();
+    const n = (r.def.nodes || []).find(x => x.id === id);
+    return n && n.config ? n.config.query : null;
+  }, qnode);
+  eq('Query 落盘 poolId', 'pool-9', qSaved && qSaved.poolId);
+  eq('Query 落盘模板值', '{{input.page}}', qSaved && qSaved.pageNo);
+  // 删掉第二行，应只剩一条
+  await page.locator('#f-query .qrow').nth(1).locator('.qdel').click();
+  await sleep(900);
+  eq('删除行后剩 1 行', 1, await page.locator('#f-query .qrow').count());
+  // 重新点开同一个节点，值应回显
+  await page.locator('#buildCanvas .node[data-node="' + qnode + '"]').click();
+  await sleep(400);
+  eq('重新打开回显 poolId', 'poolId', await page.locator('#f-query .qrow').first().locator('.qk').inputValue());
+
   console.log('── E5 删除节点 ──');
   const delBtns = await page.locator('.node-del').count();
   eq('非 start 节点都有删除按钮', 2, delBtns);

@@ -209,8 +209,35 @@ assert loop['status']=='done' and loop['output']['count']==2, loop.get('output')
 assert all(x['ok'] for x in loop['output']['results'])
 " ; chk "循环节点逐项执行 2 个订单全部成功" $?
 
+echo "══ T12 节点 Query 参数（合并进 URL / 模板渲染 / URL 手写优先）══"
+Q_DEF=flow_e2e_query
+cat > /tmp/e2e-query.json <<EOF
+{"def":{"id":"$Q_DEF","name":"Query参数验证","version":0,
+ "trigger":{"type":"webhook"},
+ "input":{"sample":{"page":3}},
+ "nodes":[
+  {"id":"start","type":"start","name":"开始","config":{}},
+  {"id":"probe","type":"http","name":"探针","config":{"method":"GET","url":"$B/upstream/_sandbox","query":{"poolId":"pool-1","pageNo":"{{input.page}}","empty":"","arr":["a","b"]}}},
+  {"id":"probe2","type":"http","name":"URL优先","config":{"method":"GET","url":"$B/upstream/_sandbox?poolId=url-wins","query":{"poolId":"query-loses","extra":"x"}}}],
+ "edges":[{"from":"start","to":"probe"},{"from":"probe","to":"probe2"}]}}
+EOF
+curl -s -X POST $B/api/flows/$Q_DEF/draft -H 'content-type: application/json' -d @/tmp/e2e-query.json > /dev/null
+curl -s -X POST $B/api/flows/$Q_DEF/dry-run | $P -c "
+import sys,json
+d=json.load(sys.stdin)
+assert d.get('status')=='success', d.get('status')
+n1=d['nodes']['probe']; q=n1['output']['query']; u=n1['request']['url']
+assert q['poolId']=='pool-1', q
+assert q['pageNo']=='3', q                      # {{input.page}} 渲染成 3
+assert 'empty' not in q, q                      # 空值不上 URL
+assert 'arr=a' in u and 'arr=b' in u, u         # 数组展开成多值
+n2=d['nodes']['probe2']; q2=n2['output']['query']
+assert q2['poolId']=='url-wins', q2             # URL 手写同名参数优先
+assert q2['extra']=='x', q2
+" ; chk "Query 参数合并 / 渲染 / 数组 / URL 优先" $?
+
 # ══ 清理自建数据（种子流程 / NL 草稿流程 / 种子接口来源）══
-for FID in $SEED flow_e2e_loop $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
+for FID in $SEED flow_e2e_loop flow_e2e_query $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
   [ -n "$FID" ] && curl -s -X DELETE $B/api/flows/$FID > /dev/null
 done
 [ -n "$SRC_ID" ] && curl -s -X DELETE $B/api/sources/$SRC_ID > /dev/null && echo "  （种子接口来源已清理）"

@@ -602,3 +602,13 @@ tbody tr:hover{background:var(--bg2)}
 /* ── 凭证卡片的模式下拉（此前是裸 select，原生白底，深色页面上很扎眼）── */
 .srccard .acts .mode-sel{flex:0 0 auto;max-width:none;font-size:12.5px;padding:4px 7px;background:var(--bg0)}
 .srccard .acts .mode-sel:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(47,191,143,.15)}
+
+/* ── 节点属性：Query 参数键值行 ── */
+.kv .qrows{display:flex;flex-direction:column;gap:6px;min-width:0}
+.kv .qrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) 24px;gap:6px;align-items:center}
+.kv .qrow input{min-width:0;font-size:13px;padding:4px 7px}
+.kv .qrow .qk{font-family:var(--font-mono);font-size:12.5px}
+.kv .qdel{border:1px solid transparent;background:none;color:var(--faint);cursor:pointer;font-size:11px;line-height:1;padding:5px 0;border-radius:6px}
+.kv .qdel:hover{color:var(--bad);background:var(--bad-bg);border-color:var(--red-line)}
+.kv .qadd{align-self:flex-start;margin-top:2px;border:1px dashed var(--line);background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px;padding:3px 10px;border-radius:7px;transition:border-color .12s,color .12s}
+.kv .qadd:hover{color:var(--teal);border-color:var(--teal-line);background:var(--teal-bg)}
