@@ -251,8 +251,69 @@ assert q2['poolId']=='url-wins', q2             # URL 手写同名参数优先
 assert q2['extra']=='x', q2
 " ; chk "Query 参数合并 / 渲染 / 数组 / URL 优先" $?
 
+echo "══ T15 结束断言（def.end.assert：流程跑完后统一校验）══"
+END_DEF=flow_e2e_end
+cat > /tmp/e2e-end.json <<EOF
+{"def":{"id":"$END_DEF","name":"结束断言验证","version":0,
+ "input":{"sample":{}},
+ "nodes":[
+  {"id":"start","type":"start","name":"开始","config":{}},
+  {"id":"probe","type":"http","name":"探针","config":{"method":"GET","url":"$B/upstream/_sandbox"}}],
+ "edges":[{"from":"start","to":"probe"}],
+ "end":{"assert":{"expr":["nodes.probe.output != null"]}}}}
+EOF
+curl -s -X POST $B/api/flows/$END_DEF/draft -H 'content-type: application/json' -d @/tmp/e2e-end.json > /dev/null
+# Dry-run 剥离 end（写操作桩会让引用其输出的断言误报，故一律不在 Dry-run 校验）
+curl -s -X POST $B/api/flows/$END_DEF/dry-run | $P -c "
+import sys,json
+d=json.load(sys.stdin)
+assert d.get('status')=='success', d.get('status')
+" ; chk "Dry-run 不受结束断言影响（已剥离）" $?
+curl -s -X POST $B/api/flows/$END_DEF/publish -H 'content-type: application/json' -d '{"confirm":true}' > /dev/null
+RID=$(curl -s -X POST $B/api/flows/$END_DEF/run -H 'content-type: application/json' -d '{}' | $P -c "import sys,json;print(json.load(sys.stdin)['runId'])")
+sleep 1.5
+getrun $RID | $P -c "
+import sys,json
+r=json.load(sys.stdin)
+assert r['status']=='success', (r.get('status'), r.get('error'))
+" ; chk "断言成立 → 流程 success" $?
+# 断言不成立 → failed + assert_fail 事件（node=__end__）
+$P - <<PYEOF
+import json,urllib.request
+op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+def api(p,m='GET',b=None):
+    r=urllib.request.Request('$B'+p,method=m,data=json.dumps(b).encode() if b is not None else None,headers={'content-type':'application/json'})
+    with op.open(r,timeout=30) as x: return json.loads(x.read())
+d=json.load(open('/tmp/e2e-end.json'))['def']
+d['end']={'assert':{'expr':['nodes.probe.output.total >= 999']}}
+api('/api/flows/$END_DEF/draft','POST',{'def':d})
+api('/api/flows/$END_DEF/dry-run','POST',{})
+api('/api/flows/$END_DEF/publish','POST',{'confirm':True})
+r=api('/api/flows/$END_DEF/run','POST',{})
+import time; time.sleep(1.5)
+run=api('/api/runs/'+r['runId'])
+assert run['status']=='failed', run.get('status')
+assert (run.get('error') or '').startswith('结束断言失败'), run.get('error')
+evs=[e for e in run.get('events',[]) if e['event']=='assert_fail']
+assert evs and evs[-1]['data']['node']=='__end__', [e['event'] for e in run.get('events',[])]
+PYEOF
+chk "断言不成立 → failed + assert_fail(__end__)" $?
+# Schema 闸拦截坏结构
+$P - <<PYEOF
+import json,urllib.request
+op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+def api(p,m='POST',b=None):
+    r=urllib.request.Request('$B'+p,method=m,data=json.dumps(b).encode() if b is not None else None,headers={'content-type':'application/json'})
+    with op.open(r,timeout=30) as x: return json.loads(x.read())
+d=json.load(open('/tmp/e2e-end.json'))['def']
+d['end']={'assert':{'expr':[123]}}
+g=api('/api/flows/$END_DEF/draft','POST',{'def':d})['gates']['schema']
+assert g['ok'] is False and any('end.assert.expr' in e for e in g['errors']), g
+PYEOF
+chk "Schema 闸拦截非法 end.assert 结构" $?
+
 # ══ 清理自建数据（种子流程 / NL 草稿流程 / 种子接口来源）══
-for FID in $SEED flow_e2e_loop flow_e2e_query $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
+for FID in $SEED flow_e2e_loop flow_e2e_query $END_DEF $( [ -f /tmp/t3.json ] && $P -c "import json;print(json.load(open('/tmp/t3.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t4.json ] && $P -c "import json;print(json.load(open('/tmp/t4.json')).get('flow',{}).get('id',''))" ) $( [ -f /tmp/t9.json ] && $P -c "import json;print(json.load(open('/tmp/t9.json')).get('flow',{}).get('id',''))" ); do
   [ -n "$FID" ] && curl -s -X DELETE $B/api/flows/$FID > /dev/null
 done
 [ -n "$SRC_ID" ] && curl -s -X DELETE $B/api/sources/$SRC_ID > /dev/null && echo "  （种子接口来源已清理）"

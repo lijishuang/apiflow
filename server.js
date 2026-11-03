@@ -505,10 +505,12 @@ function readRaw(req, limit) {
   });
 }
 
-// Dry-run：将写操作节点替换为转换桩（只读接口真实执行）
+// Dry-run：将写操作节点替换为转换桩（只读接口真实执行）。
+// end（结束断言）一并剥离：写操作被替换成桩后其输出不存在，引用它的断言必然误报
 function makeDryDef(def) {
+  const { end, ...rest } = def;
   return {
-    ...def,
+    ...rest,
     nodes: def.nodes.map(n => {
       if (n.type === 'http' && !isReadOnly(n)) {
         return { id: n.id, type: 'transform', name: n.name + '（Dry-run 跳过写操作）', config: { expr: { _dryRun: 'write-skipped' } } };

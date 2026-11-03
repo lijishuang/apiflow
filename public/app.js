@@ -787,12 +787,13 @@ function renderCanvas(el, def, mode, runState) {
   }
 
   // 虚拟「结束」终点：出度为 0 的非 start 节点就是流程出口，从各出口引虚线汇到这里。
-  // end 只是展示 —— 不进 DSL、不参与校验/执行/保存；拖出口节点时跟着重定位（repositionEndNode）。
+  // 位置可拖动（记忆在 layout.__end__，随草稿/发布保存）；def.end.assert 结束断言在流程跑完后由引擎统一校验。
   const outDeg = {};
   for (const e of def.edges || []) outDeg[e.from] = (outDeg[e.from] || 0) + 1;
   const exits = def.nodes.filter(n => n.type !== 'start' && !(outDeg[n.id] > 0));
   if (exits.length) {
-    const endPos = endNodePos(pos, exits);
+    const manual = layout.__end__ && typeof layout.__end__.x === 'number' ? layout.__end__ : null;
+    const endPos = manual ? { x: manual.x, y: manual.y, w: 136, h: 66 } : endNodePos(pos, exits);
     pos.__end__ = endPos;
     for (const n of exits) {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -808,9 +809,17 @@ function renderCanvas(el, def, mode, runState) {
     endDiv.className = 'node end-node';
     endDiv.dataset.node = '__end__';
     endDiv.style.left = endPos.x + 'px'; endDiv.style.top = endPos.y + 'px'; endDiv.style.width = endPos.w + 'px';
-    endDiv.innerHTML = `<div class="row1"><span class="badge end-badge">END</span><span class="name">结束</span></div>
+    const hasEndAssert = !!(def.end && def.end.assert);
+    endDiv.innerHTML = `<div class="row1"><span class="badge end-badge">END</span><span class="name">结束</span>${hasEndAssert ? '<span class="atag" title="已配置结束断言（流程结束时统一校验）">✓A</span>' : ''}</div>
       <div class="sub">自动生成</div>`;
-    endDiv.onclick = () => toast('「结束」由画布按流程出口自动生成 —— 最后一个没有下游的节点就是终点，不需要手动连线');
+    endDiv.onclick = () => {
+      if (endDiv.__justDragged) { endDiv.__justDragged = false; return; }   // 拖拽结束不当作点击
+      if (mode !== 'edit') { toast('「结束」由画布按流程出口自动生成 —— 最后一个没有下游的节点就是终点'); return; }
+      el.querySelectorAll('.node').forEach(x => x.classList.remove('st-sel'));
+      endDiv.classList.add('st-sel');
+      openEndProps(canvas);
+    };
+    if (mode === 'edit') enableDrag(endDiv, canvas, '__end__');   // 终点可拖动，位置记入 layout.__end__
     el.appendChild(endDiv);
   }
   fitCanvas(el, pos);
@@ -825,7 +834,8 @@ function endNodePos(pos, exits) {
   const ys = exits.map(n => pos[n.id].y);
   return { x: exX + 100, y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2), w: 136, h: 66 };
 }
-// 出口节点被拖动后，终点与汇聚虚线要跟着走（不重绘整图）
+// 出口节点被拖动后，终点与汇聚虚线要跟着走（不重绘整图）。
+// 用户手动拖过的终点（layout.__end__）保持手动位置，只更新虚线
 function repositionEndNode(canvas) {
   const { el, def, pos } = canvas;
   const outDeg = {};
@@ -837,7 +847,8 @@ function repositionEndNode(canvas) {
     delete pos.__end__;
     return;
   }
-  pos.__end__ = endNodePos(pos, exits);
+  const manual = def.layout && def.layout.__end__ && typeof def.layout.__end__.x === 'number' ? def.layout.__end__ : null;
+  pos.__end__ = manual ? { x: manual.x, y: manual.y, w: 136, h: 66 } : endNodePos(pos, exits);
   if (endEl) { endEl.style.left = pos.__end__.x + 'px'; endEl.style.top = pos.__end__.y + 'px'; }
   updateEdgesFor(canvas, '__end__');
 }
@@ -924,7 +935,9 @@ function commitLayout(canvas, id) {
   canvas.def.layout[id] = { x: p.x, y: p.y };
   if (state.draft && canvas.def === state.draft) {
     const note = $('#buildNote');
-    if (note) note.textContent = `布局已更新（${id} → ${p.x}, ${p.y}）· 发布时一并保存`;
+    if (note) note.textContent = id === '__end__'
+      ? `终点位置已调整（${p.x}, ${p.y}）· 发布时一并保存`
+      : `布局已更新（${id} → ${p.x}, ${p.y}）· 发布时一并保存`;
   }
 }
 function showProvenance(fromNode, dataJson) {
@@ -1521,6 +1534,62 @@ function onNodeClick(n, mode) {  state.selNode = n;
   if (n.type === 'http' && n.operationId) loadQueryHints(n);
 }
 
+/* ── END 终点属性：结束断言（流程跑完后统一校验）+ 位置重置 ── */
+function endExprRow(v = '') {
+  return `<div class="qrow"><input class="qv" placeholder="如 nodes.查库存.output.count >= 1" value="${esc(v)}"><button type="button" class="qdel" title="删除这条断言">✕</button></div>`;
+}
+function collectEndExprs() {
+  return [...document.querySelectorAll('#f-end-exprs .qv')].map(i => i.value.trim()).filter(Boolean);
+}
+function openEndProps(canvas) {
+  const f = $('#nodeForm');
+  const def = canvas.def;
+  const assert = (def.end && def.end.assert) || {};
+  const exprs = Array.isArray(assert.expr) ? assert.expr : (assert.expr ? [assert.expr] : []);
+  f.innerHTML = `
+    <span class="kv-sec">结束断言</span>
+    <b>表达式</b><div class="qblock"><div class="qrows" id="f-end-exprs">${exprs.map(e => endExprRow(e)).join('') || endExprRow()}<button type="button" class="qadd" id="f-end-add" title="新增一条结束断言">＋ 添加断言</button></div></div>
+    <span class="kv-sec">位置</span>
+    <b>终点</b><button type="button" class="btn sm" id="f-end-reset">重置到自动位置</button>
+    <span class="note">断言在整个流程跑完后统一校验，任一不成立 → 流程判失败并标红。可用左值：nodes.节点id.output.字段、input.字段、run.num，例：nodes.check_stock.output.count &gt;= 1。终点可直接拖动，位置随草稿保存；这里可一键回到自动排布。</span>`;
+  const apply = () => {
+    const list = collectEndExprs();
+    if (list.length) { def.end = def.end || {}; def.end.assert = { expr: list }; }
+    else delete def.end;
+    renderBuildCanvas();
+    const el = $('#buildCanvas').querySelector('[data-node="__end__"]'); if (el) el.classList.add('st-sel');
+    saveCanvasDraft();   // 断言落草稿（Schema 闸会校验 end.assert 结构）
+  };
+  f.oninput = apply;
+  f.onclick = e => {
+    const wrap = $('#f-end-exprs');
+    if (e.target.closest('#f-end-add') && wrap) {
+      const btn = wrap.querySelector('#f-end-add');
+      const row = document.createElement('div');
+      row.innerHTML = endExprRow();
+      wrap.insertBefore(row.firstElementChild, btn);
+      wrap.querySelector('.qrow:last-of-type .qv').focus();
+      return;
+    }
+    const del = e.target.closest('.qdel');
+    if (del && wrap) {
+      del.closest('.qrow').remove();
+      if (!wrap.querySelector('.qrow')) {   // 删空了留一行空行，面板不塌
+        const t = document.createElement('div');
+        t.innerHTML = endExprRow();
+        wrap.insertBefore(t.firstElementChild, wrap.querySelector('#f-end-add'));
+      }
+      apply();
+    }
+  };
+  const reset = $('#f-end-reset');
+  if (reset) reset.onclick = () => {
+    if (def.layout) delete def.layout.__end__;
+    repositionEndNode(canvas);
+    toast('终点已回到自动位置');
+  };
+}
+
 /* ── Query 参数候选：SDK 字段 + 网关报错学到的必填项 ── */
 const qhCache = new Map();     // operationId -> 参数提示（同一会话内复用）
 async function loadQueryHints(n) {
@@ -1771,7 +1840,7 @@ function fmtEvent(p) {
   if (p.event === 'edge_data') return `<div><span class="t">${t}</span>  <span class="ev">edge_data</span>   ${esc(d.from)} → ${esc(d.to)}   <span class="data">${esc(d.data)}</span></div>`;
   if (p.event === 'edge_skip') return `<div><span class="t">${t}</span>  <span class="t">edge_skip</span>   ${esc(d.from)} → ${esc(d.to)} (${esc(d.label || '')} 未命中)</div>`;
   if (p.event === 'error') return `<div><span class="t">${t}</span>  <span class="bad">error</span>        ${esc(d.node)} ${esc(d.error)}</div>`;
-  if (p.event === 'assert_fail') return `<div><span class="t">${t}</span>  <span class="bad">assert_fail</span> ${esc(d.node)} <span class="bad">${esc((d.fails || []).join('；'))}</span></div>`;
+  if (p.event === 'assert_fail') return `<div><span class="t">${t}</span>  <span class="bad">assert_fail</span> ${esc(d.node === '__end__' ? '结束断言' : d.node)} <span class="bad">${esc((d.fails || []).join('；'))}</span></div>`;
   if (p.event === 'run_end') return `<div><span class="t">${t}</span>  <span class="ev">run_end</span>     <b class="${d.status === 'success' ? 'ok' : 'bad'}">#${d.num} ${esc(d.status)}</b> ${d.durationMs}ms</div>`;
   return `<div><span class="t">${t}</span>  ${esc(p.event)}</div>`;
 }

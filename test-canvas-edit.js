@@ -146,6 +146,47 @@ const eq = (t, want, got) => (want === got ? ok(`${t}`) : bad(`${t}（期望 ${w
   const dy = Math.round(endAfter.y - endBefore.y);
   (Math.abs(dy) > 30 ? ok : bad)(`拖出口节点后终点跟随（Δy=${dy}）`);
 
+  console.log('── E5c END 终点：本体拖动 + 结束断言 ──');
+  const eb = await page.locator('#buildCanvas .end-node').boundingBox();
+  await page.mouse.move(eb.x + eb.width / 2, eb.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(eb.x + eb.width / 2 - 100, eb.y + 90, { steps: 6 });
+  await page.mouse.up();
+  await sleep(400);
+  const ea2 = await page.locator('#buildCanvas .end-node').boundingBox();
+  (Math.abs(ea2.x - eb.x) > 60 && Math.abs(ea2.y - eb.y) > 40 ? ok : bad)(`END 本体可拖动（Δx=${Math.round(ea2.x - eb.x)}, Δy=${Math.round(ea2.y - eb.y)}）`);
+  const lay = await page.evaluate(() => (state.draft.layout || {}).__end__ || null);
+  (lay && typeof lay.x === 'number' ? ok : bad)('拖动位置记入 layout.__end__');
+  const noteEnd = await page.locator('#buildNote').innerText();
+  (noteEnd.includes('终点位置已调整') ? ok : bad)('拖动提示: ' + noteEnd);
+  // 点击 END（第一次 click 被拖拽抑制）→ 属性面板
+  await page.locator('#buildCanvas .end-node').click();
+  await sleep(200);
+  await page.locator('#buildCanvas .end-node').click();
+  await sleep(400);
+  eq('END 属性面板出现', true, await page.locator('#f-end-exprs').isVisible());
+  eq('重置位置按钮存在', 1, await page.locator('#f-end-reset').count());
+  const exitId = await page.locator('#buildCanvas .node').nth(1).getAttribute('data-node');
+  await page.locator('#f-end-exprs .qrow .qv').first().fill('nodes.' + exitId + '.output != null');
+  await sleep(900);
+  const endSaved = await page.evaluate(async id => (await (await fetch('/api/flows/' + id + '/def')).json()), await page.evaluate(() => state.draftFlowId));
+  eq('结束断言落盘 def.end', JSON.stringify(['nodes.' + exitId + '.output != null']),
+    JSON.stringify(endSaved.def && endSaved.def.end && endSaved.def.end.assert && endSaved.def.end.assert.expr));
+  eq('✓A 徽标出现', 1, await page.locator('#buildCanvas .end-node .atag').count());
+  // 多行增删
+  await page.click('#f-end-add');
+  await page.locator('#f-end-exprs .qrow').nth(1).locator('.qv').fill('run.num >= 1');
+  await sleep(600);
+  eq('添加后两条断言', 2, await page.evaluate(() => state.draft.end.assert.expr.length));
+  await page.locator('#f-end-exprs .qrow').first().locator('.qdel').click();
+  await sleep(800);
+  eq('删一行后剩 run.num 断言', JSON.stringify(['run.num >= 1']),
+    await page.evaluate(() => JSON.stringify(state.draft.end.assert.expr)));
+  // 重置位置
+  await page.click('#f-end-reset');
+  await sleep(400);
+  eq('重置后 layout.__end__ 清空', null, await page.evaluate(() => (state.draft.layout || {}).__end__ || null));
+
   console.log('── E6 自动保存 ──');
   const note = await page.locator('#buildNote').innerText();
   (note.includes('自动保存') || note.includes('Schema 有问题') || note.includes('布局已更新') ? ok : bad)('保存提示: ' + note);
