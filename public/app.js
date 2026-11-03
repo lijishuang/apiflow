@@ -901,8 +901,21 @@ function renderCanvas(el, def, mode, runState) {
       path.setAttribute('stroke-dasharray', '5 5');
       path.setAttribute('marker-end', `url(#ah-${mode})`);
       svg.appendChild(path);
-      canvas.edges.push({ from: n.id, to: '__end__', path });   // 不带 chip/del：终点连线不可点
-      updateEdge(canvas, canvas.edges[canvas.edges.length - 1]);
+      const rec = { from: n.id, to: '__end__', path };
+      // 编辑模式下虚线也可点：打开「结束」断言配置（终点不消费数据，没有边映射可编辑）
+      if (mode === 'edit') {
+        const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        hit.setAttribute('class', 'edge-hit');
+        hit.setAttribute('stroke-width', '14');
+        hit.setAttribute('fill', 'none');
+        hit.style.cursor = 'pointer';
+        hit.title = '结束节点不消费数据 —— 点击配置结束断言（流程跑完后统一校验）';
+        hit.onclick = ev => { ev.stopPropagation(); openEndProps(canvas); };
+        svg.appendChild(hit);
+        rec.hit = hit;
+      }
+      canvas.edges.push(rec);
+      updateEdge(canvas, rec);
     }
     const endDiv = document.createElement('div');
     endDiv.className = 'node end-node';
@@ -1666,6 +1679,25 @@ function collectQueryRows() {
   });
   return out;
 }
+/* 断言区（所有可执行节点通用）：HTTP 含状态码；其他节点对计算出的输出校验 字段/表达式 */
+function assertSectionHtml(n, isHttp, exprHint) {
+  const a = n.assert || {};
+  const statusRow = isHttp ? `<b>状态码</b><input id="f-ast-status" value="${esc((a.status || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">` : '';
+  return `${statusRow}
+      <b>输出字段</b><input id="f-ast-fields" value="${esc((a.outputHas || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
+      <b>表达式</b><input id="f-ast-expr" value="${esc(a.expr || '')}" placeholder="${esc(exprHint || '如 count >= 1（可空）')}">`;
+}
+function collectAssertInputs(withStatus) {   // 全空 = 移除断言；HTTP 无状态码时沿用 ok:true 语义
+  const st = withStatus ? ($('#f-ast-status')?.value || '').split(',').map(x => parseInt(x.trim(), 10)).filter(x => !isNaN(x)) : [];
+  const fields = ($('#f-ast-fields')?.value || '').split(',').map(x => x.trim()).filter(Boolean);
+  const expr = ($('#f-ast-expr')?.value || '').trim();
+  if (!st.length && !fields.length && !expr) return null;
+  const a = {};
+  if (withStatus) { if (st.length) a.status = st; else a.ok = true; }
+  if (fields.length) a.outputHas = fields;
+  if (expr) a.expr = expr;
+  return a;
+}
 function onNodeClick(n, mode) {  state.selNode = n;
   if (mode !== 'edit') { showRunDrawer(n.id); return; }   // 运行观测：打开节点详情抽屉
   const f = $('#nodeForm');
@@ -1683,12 +1715,23 @@ function onNodeClick(n, mode) {  state.selNode = n;
       <b>幂等键</b><input id="f-idem" value="${esc(n.idempotencyKey || '')}" placeholder="写操作建议配置">
       <b>超时(ms)</b><input id="f-timeout" type="number" value="${n.timeout || 10000}">
       <span class="kv-sec">断言</span>
-      <b>状态码</b><input id="f-ast-status" value="${esc(((n.assert && n.assert.status) || []).join(','))}" placeholder="如 200,201（可空，默认校验 2xx）">
-      <b>输出字段</b><input id="f-ast-fields" value="${esc(((n.assert && n.assert.outputHas) || []).join(','))}" placeholder="输出必须包含的顶层字段，逗号分隔">
-      <b>表达式</b><input id="f-ast-expr" value="${esc((n.assert && n.assert.expr) || '')}" placeholder="如 score >= 60（可空）">
+      ${assertSectionHtml(n, true)}
       <span class="note">URL / Query / Body 里都可写 {{input.x}} 或 {{nodes.节点id.output.字段}}。<b>{{input.x}} 取的是「传进这个节点的数据」</b>—— 上游连线整包传递时是流程输入；连线上配置了数据映射（点连线编辑）时是映射结果。Query 参数会合并进 URL；如果 URL 里已经手写了同名参数，以 URL 里的为准（不重复追加）。断言在运行期对真实响应校验，失败则节点标红并中断流程；「自动加断言」会按注册表字段一键生成。</span>`;
   } else if (n.type === 'condition') {
-    f.innerHTML = `<span class="kv-sec">条件</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != &gt; &lt; &gt;= &lt;= includes，左值为上游输出字段</span>`;
+    f.innerHTML = `<span class="kv-sec">条件</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-expr" value="${esc(n.config.expr)}"><span class="note">支持 == != &gt; &lt; &gt;= &lt;= includes，左值为上游输出字段</span>
+      <span class="kv-sec">断言</span>
+      ${assertSectionHtml(n, false, '如 result == true（对条件输出校验）')}
+      <span class="note">条件节点输出是 <code>{expr, result}</code>：断言表达式左值可写 <code>result</code>（如 <code>result == true</code>，给「走了哪个分支」加硬校验）或 <code>output.result</code>。</span>`;
+  } else if (n.type === 'transform') {
+    f.innerHTML = `<span class="kv-sec">转换</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>表达式</b><input id="f-texpr" value="${esc(n.config.expr)}"><span class="note">轻量转换：取值 / 组装 / 映射，支持 {{nodes.节点id.output.字段}} 与 {{input.字段}}</span>
+      <span class="kv-sec">断言</span>
+      ${assertSectionHtml(n, false, '对转换结果校验，如 output != null')}
+      <span class="note">断言对<b>转换后的结果</b>校验：结果是对象时左值直接写字段名，标量用 <code>output</code>（如 <code>output &gt; 0</code>），失败则节点标红并中断流程。</span>`;
+  } else if (n.type === 'loop') {
+    f.innerHTML = `<span class="kv-sec">循环</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><b>遍历</b><input id="f-lover" value="${esc(n.config.over)}" placeholder="{{nodes.取数.output.list}}"><b>别名</b><input id="f-las" value="${esc(n.config.as || 'item')}" placeholder="item（循环体内 {{item}} 引用）">
+      <span class="kv-sec">断言</span>
+      ${assertSectionHtml(n, false, '如 count >= 1')}
+      <span class="note">循环节点输出是 <code>{count, results}</code>：断言表达式左值可写 <code>count</code>（如 <code>count &gt;= 1</code>，空列表即失败）。</span>`;
   } else { f.innerHTML = `<span class="kv-sec">节点</span><b>名称</b><input id="f-name" value="${esc(n.name)}"><span class="note">${n.type} 节点暂无更多可编辑属性</span>`; }
   // 调试产物：该节点最近一次调试运行的输出 / 断言失败详情
   const dbg = state.debugRun && state.debugRun.nodes && state.debugRun.nodes[n.id];
@@ -1706,25 +1749,20 @@ function onNodeClick(n, mode) {  state.selNode = n;
       else { try { n.config.body = JSON.parse(raw); } catch { /* 等输入合法再写入 */ } }
     }
     if ($('#f-expr')) n.config.expr = $('#f-expr').value;
+    if ($('#f-texpr')) n.config.expr = $('#f-texpr').value;
+    if ($('#f-lover')) { n.config.over = $('#f-lover').value; n.config.as = $('#f-las').value.trim() || 'item'; }
     if ($('#f-query')) {   // Query 参数：空行忽略，全空即移除；参数名重复时后者覆盖前者
       const q = collectQueryRows();
       if (Object.keys(q).length) n.config.query = q; else delete n.config.query;
     }
-    if ($('#f-ast-status')) {   // 断言编辑：三项全空 = 移除断言
-      const st = $('#f-ast-status').value.split(',').map(x => parseInt(x.trim(), 10)).filter(x => !isNaN(x));
-      const fields = $('#f-ast-fields').value.split(',').map(x => x.trim()).filter(Boolean);
-      const expr = $('#f-ast-expr').value.trim();
+    if ($('#f-ast-fields')) {   // 断言编辑：全空 = 移除断言（HTTP 含状态码，其他节点仅 字段/表达式）
+      const a = collectAssertInputs(!!$('#f-ast-status'));
       delete n.assert;
-      if (st.length || fields.length || expr) {
-        n.assert = {};
-        if (st.length) n.assert.status = st; else n.assert.ok = true;
-        if (fields.length) n.assert.outputHas = fields;
-        if (expr) n.assert.expr = expr;
-      }
+      if (a) n.assert = a;
     }
     renderBuildCanvas();
     const el = $('#buildCanvas').querySelector(`[data-node="${n.id}"]`); if (el) el.classList.add('st-sel');
-    if ($('#f-query')) saveCanvasDraft();   // Query 行的增删改也要落草稿
+    if ($('#f-query') || $('#f-ast-fields') || $('#f-texpr') || $('#f-lover')) saveCanvasDraft();   // Query/断言/转换表达式/循环配置的编辑都要落草稿
   };
   // Query 参数行：＋ 追加一行、✕ 删除一行（都对 config.query 生效并立即存草稿）
   f.onclick = e => {
