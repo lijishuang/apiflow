@@ -875,8 +875,8 @@ function renderCanvas(el, def, mode, runState) {
     div.dataset.node = n.id;
     const [bt, bs] = nodeBadge(n);
     const sub = n.type === 'http' ? n.config.url.replace(/^https?:\/\/[^/]+/, '') : n.type === 'condition' ? n.config.expr : n.type === 'loop' ? (n.config.over || '') : (n.type === 'transform' ? '转换' : 'input');
-    div.innerHTML = `<div class="row1"><span class="badge" style="${bs}">${bt}</span><span class="name">${esc(n.name)}</span><span style="flex:1"></span>${n.assert ? '<span class="atag" title="已配置断言检查">✓A</span>' : ''}${mode === 'edit' && n.type !== 'start' ? `<button class="node-del" title="删除此节点（相关连线一并移除）">✕</button>` : ''}<span class="dot"></span></div>
-      <div class="sub">${esc(sub)}</div>
+    div.innerHTML = `<div class="row1"><span class="badge" style="${bs}">${bt}</span><span class="name" title="${esc(n.name)}">${esc(n.name)}</span><span style="flex:1"></span>${n.assert ? '<span class="atag" title="已配置断言检查">✓A</span>' : ''}${mode === 'edit' && n.type !== 'start' ? `<button class="node-del" title="删除此节点（相关连线一并移除）">✕</button>` : ''}<span class="dot"></span></div>
+      <div class="sub" title="${esc(sub)}">${esc(sub)}</div>
       <div class="meta"></div>`;
     const delBtn = div.querySelector('.node-del');
     if (delBtn) delBtn.onclick = ev => { ev.stopPropagation(); removeNode(n.id); };

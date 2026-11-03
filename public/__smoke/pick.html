@@ -1,0 +1,22 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head>
+<body class="dark">
+<div class="modal" id="opPickModal">
+  <div class="modal-box" style="width:640px;max-height:78vh;display:flex;flex-direction:column">
+    <div class="modal-head"><b>添加接口节点</b><span style="flex:1"></span><button class="btn">关闭</button></div>
+    <div style="padding:10px 14px 0"><input id="opPickSearch" class="sel" style="width:100%" placeholder="搜索接口名 / 路径 / 关键词…"></div>
+    <div class="modal-body" id="opPickList" style="overflow:auto"></div>
+  </div>
+</div>
+<script>
+const ops = [
+  {id:'query_supplier',method:'GET',name:'查询供应商',path:'/upstream/supplier',description:'查询供应商准入状态与基础信息',params:['supplierId'],readOnly:true},
+  {id:'sync_score',method:'POST',name:'同步分数给 ERP',path:'/upstream/erp/score',description:'把准入分数同步给 ERP 系统',params:['supplierId','score'],readOnly:false},
+  {id:'query_stock',method:'GET',name:'查询库存',path:'/upstream/stock/query',description:'按 SKU 查询库存余量',params:['sku'],readOnly:true},
+];
+document.getElementById('opPickList').innerHTML = ops.map(o => `
+    <div class="srccard" style="cursor:pointer;margin-bottom:8px">
+      <div class="h"><span class="vtag">${o.method}</span>${o.name}<span style="flex:1"></span><span class="m">${o.path}</span></div>
+      <div class="m">${o.description}${o.readOnly === false ? ' · <b style="color:var(--amber)">写操作（已预置幂等键）</b>' : ''} · 参数：${o.params.join(', ')}</div>
+    </div>`).join('');
+</script>
+</body></html>

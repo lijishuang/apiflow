@@ -116,11 +116,12 @@ body{transition:background .2s ease,color .2s ease}
 .node:hover{box-shadow:var(--shadow-m);transform:translateY(-1px);border-color:#2C3750}
 .node.dragging{box-shadow:var(--shadow-l);z-index:6;transform:translateY(0) scale(1.01)}
 .canvas.is-dragging,.canvas.is-dragging .node{cursor:grabbing}
-.node .row1{display:flex;align-items:center;gap:7px}
-.badge{font-size:13.5px;font-weight:700;letter-spacing:.04em;padding:1.5px 7px;border-radius:5px}
-.node .name{font-size:16px;font-weight:600;white-space:nowrap}
-.node .sub{font-size:14.5px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.node .meta{font-size:14.5px;margin-top:5px;display:flex;gap:8px;align-items:center}
+.node .row1{display:flex;align-items:center;gap:7px;min-width:0}
+.badge{font-size:13.5px;font-weight:700;letter-spacing:.04em;padding:1.5px 7px;border-radius:5px;flex:none}
+.node .name{font-size:16px;font-weight:600;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.node .sub{font-size:14.5px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node .meta{font-size:14.5px;margin-top:5px;display:flex;gap:8px;align-items:center;min-width:0;overflow:hidden;white-space:nowrap}
+.node .meta > span:not(.oprev){min-width:0;overflow:hidden;text-overflow:ellipsis}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
 .st-ok{border-left-color:var(--ok)} .st-ok .dot{background:var(--ok)}
 .st-run{border-left-color:var(--blue)} .st-run .dot{background:var(--blue);animation:pulse 1.4s infinite}
@@ -467,7 +468,7 @@ tbody tr:hover{background:var(--bg2)}
 .dbglog .bad{color:var(--bad)}
 .dbglog .warn{color:var(--amber)}
 .dbglog .data{color:var(--ink-2);opacity:.85;word-break:break-all}
-.node .atag{font-size:12px;padding:1px 4px;border-radius:4px;background:var(--teal-bg);color:var(--teal);font-weight:700;letter-spacing:.3px}
+.node .atag{font-size:12px;padding:1px 4px;border-radius:4px;background:var(--teal-bg);color:var(--teal);font-weight:700;letter-spacing:.3px;flex:none}
 
 /* 首页 24 小时趋势 */
 .trend{display:flex;align-items:flex-end;gap:3px;height:92px}
@@ -636,7 +637,7 @@ tbody tr:hover{background:var(--bg2)}
 /* ── 搭建器：画布手动编辑 ── */
 .canvas-tools{position:absolute;top:10px;left:10px;z-index:8;display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 10px;box-shadow:var(--shadow-s);flex-wrap:wrap;max-width:calc(100% - 20px)}
 .canvas-tools .note{margin:0}
-.node-del{border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;line-height:1;padding:3px 5px;border-radius:5px}
+.node-del{border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;line-height:1;padding:3px 5px;border-radius:5px;flex:none}
 .node-del:hover{color:var(--bad);background:var(--bad-bg)}
 .edge-del{position:absolute;width:16px;height:16px;line-height:14px;text-align:center;font-size:10px;border-radius:50%;background:var(--panel);border:1px solid var(--line);color:var(--muted);cursor:pointer;z-index:5;opacity:.55;transition:opacity .15s}
 .edge-del:hover{opacity:1;color:var(--bad);border-color:var(--bad)}
