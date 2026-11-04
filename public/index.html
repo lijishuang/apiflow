@@ -230,6 +230,7 @@
     <span style="flex:1"></span>
     <label class="note">对比 <select id="cmpA" class="sel"><option>—</option></select><select id="cmpB" class="sel"><option>—</option></select></label>
     <button class="btn" id="btnCmp">运行对比</button>
+    <button class="btn" id="btnReport" title="根据本次运行生成测试报告，可下载 Markdown / HTML">📋 测试报告</button>
     <button class="btn primary" id="btnRun">▶ 运行</button>
   </div>
   <div class="runner-main">
@@ -258,6 +259,20 @@
   <div class="modal-box">
     <div class="modal-head"><b>运行对比（逐节点 diff）</b><span style="flex:1"></span><button class="btn" onclick="document.getElementById('diffModal').classList.add('hidden')">关闭</button></div>
     <div id="diffBody" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- ═══ 测试报告弹窗 ═══ -->
+<div id="reportModal" class="modal hidden">
+  <div class="modal-box" style="width:880px;max-width:94vw">
+    <div class="modal-head"><b id="reportTitle">测试报告</b><span style="flex:1"></span>
+      <button class="btn" id="reportDlMd">⬇ Markdown</button>
+      <button class="btn" id="reportDlHtml">⬇ HTML</button>
+      <button class="btn" onclick="document.getElementById('reportModal').classList.add('hidden')">关闭</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <iframe id="reportFrame" style="width:100%;height:64vh;border:none;background:#fff" title="测试报告预览"></iframe>
+    </div>
   </div>
 </div>
 

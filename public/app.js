@@ -474,6 +474,11 @@ function renderFlowPanel() {
       <button class="btn wide" id="fpEdit">编辑画布</button>
     </div>
     <div class="panel-sec">
+      <p class="ph-label">测试报告</p>
+      <button class="btn wide" id="fpReport" ${f.version > 0 ? '' : 'disabled'}>📋 生成测试报告</button>
+      <p class="note">根据运行记录自动生成：单次明细或最近运行汇总（通过率 / 高频失败节点 / 建议），可下载 Markdown / HTML 归档。</p>
+    </div>
+    <div class="panel-sec">
       <p class="ph-label">对比定位差异</p>
       <button class="btn wide" id="fpCmp" ${f.version > 0 ? '' : 'disabled'}>⇄ 运行对比定位差异</button>
       <p class="note">取该流程最近两次运行做逐节点 diff，输出变化会高亮 —— 接口升级后的典型信号。</p>
@@ -499,6 +504,7 @@ function renderFlowPanel() {
   }
   $('#fpEdit').onclick = () => editFlow(f.id);
   $('#fpCmp').onclick = () => compareLast(f.id, $('#fpCmpResult'));
+  $('#fpReport').onclick = () => openReportModal('flow', f.id).catch(e => toast(e.message, 'bad'));
   loadRunsMini(f.id);
 }
 async function loadRunsMini(flowId) {
@@ -2859,10 +2865,50 @@ async function showDiff(aId, bId) {
     <p class="note" style="margin-top:8px">黄色行表示状态或输出存在差异（接口升级后的典型信号）。</p>`;
   $('#diffModal').classList.remove('hidden');
 }
+/* 测试报告：预览（iframe 内嵌 HTML）+ 下载 Markdown / HTML */
+async function apiText(path) {
+  const res = await fetch(path, { headers: { ...authHeaders() } });
+  if (!res.ok) { let d = {}; try { d = await res.json(); } catch {} const e = new Error(d.error || res.status); e.status = res.status; throw e; }
+  return res.text();
+}
+function downloadText(name, mime, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: mime + ';charset=utf-8' }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+let _report = null;   // 当前弹窗 { kind, id, rep, md, html }
+const reportName = (rep, ext) =>
+  `APIFlow测试报告-${rep.flowName}-${rep.kind === 'run' ? '运行#' + rep.num : '汇总'}.${ext}`.replace(/[\\/:*?"<>| ]/g, '_');
+async function openReportModal(kind, id) {
+  const rep = await api(kind === 'run' ? `/api/runs/${id}/report?format=json` : `/api/flows/${id}/report?format=json`);
+  _report = { kind, id, rep, md: null, html: null };
+  $('#reportTitle').textContent = `测试报告 · ${rep.flowName}` +
+    (kind === 'run' ? ` · 运行 #${rep.num} · ${rep.passed ? '✅ 通过' : '❌ 未通过'}` : ` · 最近 ${rep.window.total} 次汇总`);
+  $('#reportFrame').srcdoc = '<p style="font:13px sans-serif;color:#667;padding:16px">报告生成中…</p>';
+  $('#reportModal').classList.remove('hidden');
+  $('#reportFrame').srcdoc = await apiText(`${kind === 'run' ? '/api/runs/' + id + '/report' : '/api/flows/' + id + '/report'}?format=html`);
+  _report.html = $('#reportFrame').srcdoc;
+}
+$('#reportDlMd').onclick = async () => {
+  if (!_report) return;
+  const md = _report.md || (_report.md = await apiText(`${_report.kind === 'run' ? '/api/runs/' + _report.id + '/report' : '/api/flows/' + _report.id + '/report'}?format=md`));
+  downloadText(reportName(_report.rep, 'md'), 'text/markdown', md);
+};
+$('#reportDlHtml').onclick = () => {
+  if (!_report || !_report.html) return;
+  downloadText(reportName(_report.rep, 'html'), 'text/html', _report.html);
+};
 $('#btnCmp').onclick = () => {
   const a = $('#cmpA').value, b = $('#cmpB').value;
   if (!a || !b) return alert('请先在工具栏选择两个要对比的 run');
   showDiff(a, b);
+};
+$('#btnReport').onclick = () => {
+  if (!state.run || !state.run.id || state.run.status === 'running')
+    return toast('还没有可用的运行结果 —— 先运行一次再生成报告', 'bad');
+  openReportModal('run', state.run.id).catch(e => toast('报告生成失败：' + e.message, 'bad'));
 };
 $('#btnRun').onclick = async () => {
   const flowId = $('#runFlowSel').value;

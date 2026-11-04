@@ -19,6 +19,7 @@ const docs = require('./lib/docs');
 const paramhint = require('./lib/paramhint');
 const schema = require('./lib/schema');
 const changelog = require('./lib/changelog');
+const report = require('./lib/report');
 const { createCred, updateCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
 const access = require('./lib/access');
 const intent = require('./lib/intent');
@@ -1393,6 +1394,24 @@ const server = http.createServer(async (req, res) => {
         };
       });
       return json(res, 200, { a: { id: a.id, num: a.num, version: a.version }, b: { id: b.id, num: b.num, version: b.version }, diff });
+    }
+
+    /* ── 测试报告：单次运行明细 / 流程汇总，支持 md / html / json 与附件下载 ── */
+    if ((m = p.match(/^\/api\/runs\/([\w-]+)\/report$/)) && req.method === 'GET') {
+      const r = store.getRun(m[1]);
+      if (!r) return json(res, 404, { error: 'run not found' });
+      const f = store.getFlow(r.flowId);
+      const def = r.version > 0 ? (f && f.published && f.published.def) : (f && f.draft && f.draft.def);
+      const rep = report.buildRun(r, def);
+      return report.respond(res, rep, url.searchParams.get('format') || 'md', url.searchParams.get('download') === '1');
+    }
+    if ((m = p.match(/^\/api\/flows\/([\w-]+)\/report$/)) && req.method === 'GET') {
+      const f = store.getFlow(m[1]);
+      if (!f) return json(res, 404, { error: 'flow not found' });
+      const runs = store.listRuns(m[1]).filter(r => r.trigger !== 'dry-run');
+      if (!runs.length) return json(res, 409, { error: '该流程还没有真实运行记录 —— 先运行一次再生成报告' });
+      const rep = report.buildFlow(f, runs);
+      return report.respond(res, rep, url.searchParams.get('format') || 'md', url.searchParams.get('download') === '1');
     }
 
     // ── API：注册表 / 告警 / 管理 ──
