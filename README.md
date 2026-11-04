@@ -3,10 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)
 ![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
-![tests](https://img.shields.io/badge/tests-243%20passing-success)
+![tests](https://img.shields.io/badge/tests-394%20passing-success)
 ![PRs](https://img.shields.io/badge/PRs-welcome-blue)
 
-根据《APIFlow 平台系统设计图》完整实现的可运行系统。**LLM 只参与搭建，运行时是纯确定性引擎**（可重放、零 token 成本）。
+根据《APIFlow 平台系统设计图》完整实现的可运行系统。**LLM 参与搭建**（理解需求、澄清歧义、产出严格 DSL），**运行时是纯确定性引擎**（可重放、可审计、零 token 成本）。
 
 <p align="center">
   <img src="docs/architecture.svg" alt="APIFlow 架构：LLM 只参与搭建，运行期纯确定性" width="100%">
@@ -14,8 +14,10 @@
 
 | | |
 |---|---|
-| **运行观测**：节点四色状态、边数据流动画、字段级来源溯源、两次 run 逐节点 diff | **接口注册表**：OpenAPI / SDK / pip / 归档 / 帮助手册五条通道接入，版本与内容指纹绑定 |
-| ![运行观测](screenshots/final-run.png) | ![接口注册表](screenshots/api-3-registry.png) |
+| **LLM 搭建 · 澄清式反问**：拿不准接口选择 / 字段提取 / 断言标准时，出选项卡片向用户确认，点选即续答 | **运行观测 · 数据流动逐字段视图**：边上传递的数据按字段分框（类型徽标 / 展开对象 / 复制 / 下游引用标签），可切 JSON |
+| ![LLM 反问卡片](screenshots/llm-ask.png) | ![逐字段视图](screenshots/run-fields.png) |
+| **接口注册表**：OpenAPI / SDK / pip / 归档 / 帮助手册五条通道接入，版本与内容指纹绑定 | **设置页**：LLM 网关全可配（BaseURL / Key / 模型 / 温度 / max_tokens），Key 本机脱敏存储，测试连接一键验证 |
+| ![接口注册表](screenshots/api-3-registry.png) | ![LLM 设置](screenshots/llm-settings.png) |
 
 ## 启动
 
@@ -25,7 +27,24 @@ node server.js          # 零依赖，Node 22+（内置 fetch / AbortController�
 # → http://127.0.0.1:3300
 ```
 
-Docker 部署（compose / 原生、数据持久化、升级回滚）见 [docs/deploy-docker.md](docs/deploy-docker.md)。
+Docker 一键部署：
+
+```bash
+docker compose up -d --build    # 数据在 ./data 卷持久化，升级镜像不丢
+```
+
+compose / 原生、数据卷内容、内网网关连通性、升级回滚详见 [docs/deploy-docker.md](docs/deploy-docker.md)。
+
+## LLM 搭建（真实模型 · 澄清式反问）
+
+顶栏「设置」页配置任何 OpenAI 兼容网关（DeepSeek / 通义 / Kimi / 内部 aigateway…）即可启用真实 LLM 搭建：
+
+- **上下文组装**：`lib/agent.js` 的 `buildWithLLM` 把接口目录（紧凑投影，省一半 token）+ 近期对话 + 现有草稿发给模型，产出严格 DSL——条件分支、路径参数、Query/Body、节点语义命名一次到位；关键 HTTP 节点可自动补 `assert` 断言（`expr` / `outputHas` / `status`）。
+- **澄清式反问**：三类拿不准的关键决策模型不再硬猜，而是在对话里出「反问卡片」——① 需求能对上目录里多个接口；② 跨接口传参不确定该提取上游哪个字段；③ 断言 / 判断条件该用哪个标准。卡片含问题 + 2~4 个带说明的选项，**点选即回复（也可直接打字）**，模型在后续轮次看到自己的提问与你的选择后直接产出完整 DSL；反问不落草稿、不回退规则引擎。
+- **三道闸不变**：LLM 产物必须过 Schema 校验（不合格自动回退内置规则引擎并在对话里说明原因）→ Dry-run → 人工画布确认；**运行期零 LLM**，发布后的流程可重放、可审计、零 token 成本。
+- **Key 安全**：API Key 只存本机 `data/settings.json`（已 gitignore），页面与接口回显一律掩码；`APIFLOW_LLM=off` 环境变量可强制关闭（回归测试用）。
+
+![LLM 生成画布](screenshots/llm-canvas.png)
 
 ## 三大系统（对应设计图五大块）
 
@@ -35,7 +54,7 @@ Docker 部署（compose / 原生、数据持久化、升级回滚）见 [docs/de
 | **流程 DSL 唯一契约** | JSON + 校验器；`version` 版本化 / `input` 参数化（含 sample）/ 幂等键（写操作默认 `{{run.num}}-<node>`）/ 重试策略（次数 + 指数退避）/ `trigger` / `layout` 画布坐标 |
 | **运行阶段（无 LLM）** | `lib/engine.js`：触发器（手动 / Webhook `/webhook/:flowId` / 定时 `interval`）→ 调度器（拓扑推进、分支并发、条件 then/else 状态机）→ 节点执行器（HTTP / 条件 / 转换 / 循环；重试退避、超时、幂等键、**从节点重放**）→ 运行历史（run = DSL 版本 + 节点 IO 全量快照） |
 | **实时事件流** | SSE `/api/events`：`run_start / node_start / node_end / node_retry / edge_data / edge_skip / error / run_end`；事件同时持久化进 run 记录（可审计） |
-| **观测面板** | 前端三界面：节点状态四色着色、边数据流动动画 + 数据 chip（点击看**字段级来源溯源**）、节点详情抽屉（请求/响应/重试记录/从此节点重放）、**运行对比**（两次 run 逐节点 diff）、事件日志流、接口变更告警 |
+| **观测面板** | 前端三界面：节点状态四色着色、边数据流动动画 + 数据 chip（点击看**字段级来源溯源**，弹窗内逐字段视图 + JSON 切换）、节点详情抽屉（请求/响应/重试记录/从此节点重放）、**运行对比**（两次 run 逐节点 diff）、事件日志流、接口变更告警、**测试报告**（单次明细 / 流程汇总，Markdown + HTML 下载） |
 | **存储层** | `lib/store.js`：JSON 文件（`data/flows.json` / `runs.json` / `alerts.json`），保留 500 条 run；替换为 PostgreSQL 只需改此模块 |
 | **工具注册表** | `lib/registry.js`：API 目录（`/upstream/_catalog` 带 ETag）、4 秒轮询热更新（304 短路）、发布时绑定接口版本 + 内容指纹、版本变更 / 指纹漂移自动扫描受影响流程 → 告警（观测面板"运行对比定位差异"） |
 | **接口接入（前端 → 智能体）** | 「接口」页：接入 OpenAPI 地址 / 粘贴文档 JSON / 手工添加 → `lib/openapi.js` 解析（`$ref` 解引用、query 拼接、bodyExample 推导、**内容指纹 specHash**）→ 合并进目录 → 下一轮对话智能体即可用；`GET /upstream/_sandbox/*` 为接入接口的回显沙箱上游 |
@@ -103,6 +122,9 @@ DELETE /api/access/tokens/:id                            撤销令牌
 GET  /api/ext/ping  /api/ext/bootstrap                   插件探活 / 启动数据（不参与强制认证）
 POST /api/agent/plan  /api/agent/execute                 自然语言 → 计划 / 执行（插件对话入口）
 POST /api/ops/:id/debug                                  单接口调试（与流程共用引擎）
+GET/POST /api/settings                                   LLM 设置（Key 掩码回显；APIFLOW_LLM=off 强制关闭）
+POST /api/settings/test                                  LLM 连通性测试（可用未保存的表单值）
+GET  /api/changelog  /api/changelog/raw                  更新记录（解析根目录 CHANGELOG.md）/ 原文
 GET  /api/docs                                           帮助手册列表 / 统计
 POST /api/docs                       {mode:url|text}     URL 抓取（顺目录多页）/ 粘贴正文
 POST /api/docs/upload?name=                              上传 .md/.txt/.html/.pdf/.docx/.doc（二进制体）
@@ -263,7 +285,7 @@ node test-sources-ui.js # 前端「接口接入」链路自动化（空态→接
 ## 设计对齐说明
 
 - 「转换 JQ」实现为轻量表达式转换（取值/组装/映射），循环节点为 `over + 嵌入式 HTTP 请求` 形态；如需完整 JQ 可替换 `renderDeep`。
-- NL 解析为确定性规则实现（意图切分 + 目录关键词匹配 + 中式比较符映射），**接入真实 LLM 只需替换 `lib/agent.js` 的 `buildDraft`**，三道闸机制不变。
+- NL → DSL 已接真实 LLM（`buildWithLLM`，设置页配置网关即启用）：产出严格 DSL 并过 Schema 校验；未配置 Key、调用失败或输出非法时自动回退**确定性规则引擎**（`buildDraft`，意图切分 + 目录关键词匹配 + 中式比较符映射），三道闸机制不变。
 - 演示目录版本变更：`POST /api/admin/catalog-bump`（v2026.10 → v2026.11），告警出现在流程列表页。
 
 ## 安全与隐私

@@ -45,9 +45,9 @@ docker run -d --name apiflow \
 - `settings.json` 里是明文 Key，请像保护密钥一样保护这个卷（宿主机目录权限、备份策略）；
 - 首次启动（克隆后直接跑）data 目录不存在时，服务会自动创建，无需初始化步骤。
 
-## 内网 LLM 网关连通性
+## LLM 网关连通性
 
-设置页配置的内网网关（如 `http://llm-gateway.example.com/v1`）由**容器内**发起请求：
+设置页配置的网关（如 `http://llm-gateway.example.com/v1`，内网网关通常形如 `http://<内网域名或IP>:<端口>/v1`）由**容器内**发起请求：
 
 - compose 默认 bridge 网络在大多数内网环境可直接可达；若不通，优先检查宿主机防火墙与网关白名单；
 - 需要与宿主完全同网络栈时，在 `docker-compose.yml` 加 `network_mode: host`（此时 `ports` 映射失效，服务直接监听宿主 3300）；
