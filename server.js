@@ -8,7 +8,9 @@ const { Engine, bus } = require('./lib/engine');
 const { BatchRunner, MAX_FLOWS } = require('./lib/batch');
 const { Registry } = require('./lib/registry');
 const { validate, isReadOnly } = require('./lib/dsl');
-const { buildDraft, reviseDraft } = require('./lib/agent');
+const { buildDraft, reviseDraft, buildWithLLM } = require('./lib/agent');
+const llmSettings = require('./lib/settings');
+const llm = require('./lib/llm');
 const { autoFix, autoAssert } = require('./lib/autofix');
 const { parseOpenAPI, parseManual } = require('./lib/openapi');
 const { parseSDK } = require('./lib/sdk');
@@ -1230,6 +1232,37 @@ const server = http.createServer(async (req, res) => {
       // 「把告警策略列表放到最前面」「删掉最后一步」「超时改成 5 秒」都落在这里 —— 必须走调整，
       // 否则会被当成新描述重建，一句话就把用户画好的流程覆盖掉。
       const wantsNew = /(新建|重新做|重新来|另一条|另一个流程|换一条|从零|做成一条)/.test(text);
+      // ── LLM 优先：设置页启用且配置齐备时走真实模型（看懂口语、挑对接口、连对结构）；
+      //    任何失败（超时/输出非法/没配好）都回退下方规则引擎，并在返回里说明原因 ──
+      let llmError = null;
+      if (llmSettings.isLLMOn()) {
+        try {
+          const out = await buildWithLLM({
+            text, registry,
+            prevDef: (prevDef && !wantsNew) ? prevDef : null,
+            wantsNew, history: body.history || [],
+            store,
+          });
+          // 反问模式：模型对接口选择/字段提取/断言标准拿不准，向用户要确认 ——
+          // 不落草稿、不回退规则引擎（规则引擎不会提问），由前端渲染选项卡片续聊
+          if (out.ask) {
+            console.log('[agent] LLM 反问：', out.ask.question);
+            return json(res, 200, { ask: out.ask, engine: 'llm', flowId: body.flowId || null, references: refs, docRefs });
+          }
+          const flowId = (body.flowId && !wantsNew) ? body.flowId : out.draft.id;
+          out.draft.id = flowId;
+          const f = store.saveDraft(flowId, out.draft.name, out.draft, [
+            ...(body.history || []), { role: 'user', text: body.text }, { role: 'agent', text: out.explanation },
+          ]);
+          return json(res, 200, {
+            flow: { id: f.id, name: f.name }, draft: out.draft, explanation: out.explanation,
+            engine: 'llm', references: refs, docRefs, docUsed: [],
+          });
+        } catch (e) {
+          llmError = String(e.message || e);
+          console.log('[agent] LLM 生成失败，回退规则引擎：', llmError);
+        }
+      }
       let reviseMiss = null;
       if (prevDef && !wantsNew) {
         const rev = reviseDraft(text, prevDef, registry);
@@ -1242,11 +1275,12 @@ const server = http.createServer(async (req, res) => {
           return json(res, 200, {
             flow: { id: f.id, name: f.name }, draft: rev.draft, explanation: rev.explanation,
             revised: true, changes: rev.changes, references: refs, docRefs,
+            engine: 'rules', ...(llmError ? { llmError } : {}),
           });
         }
         // 明显是在调流程、但没落到具体动作 → 直接说清楚，不要拿它去重建
         if (rev.revision) {
-          return json(res, 422, { error: rev.error, references: refs, docRefs, suggestions: rev.suggestions || [] });
+          return json(res, 422, { error: rev.error, references: refs, docRefs, suggestions: rev.suggestions || [], ...(llmError ? { llmError } : {}) });
         }
         reviseMiss = rev;
       }
@@ -1255,6 +1289,7 @@ const server = http.createServer(async (req, res) => {
       if (out.error) return json(res, 422, {
         error: out.error, references: refs, docRefs: out.docRefs || docRefs,
         suggestions: (reviseMiss && reviseMiss.suggestions) || out.suggestions || [],
+        ...(llmError ? { llmError } : {}),
       });
       // 明确说了「新建/重新做/另一条…」→ 一律生成新流程，绝不动旧草稿；
       // 否则才延续当前 flowId（多轮调整语义）
@@ -1267,6 +1302,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         flow: { id: f.id, name: f.name }, draft: out.draft, explanation: out.explanation,
         references: refs, docRefs: out.docRefs || docRefs, docUsed: out.docUsed || [],
+        engine: 'rules', ...(llmError ? { llmError } : {}),
       });
     }
     if ((m = p.match(/^\/api\/flows\/([\w-]+)\/draft$/)) && req.method === 'POST') {
@@ -1839,6 +1875,32 @@ const server = http.createServer(async (req, res) => {
     if ((m = p.match(/^\/api\/alerts\/(.+)\/clear$/)) && req.method === 'POST') { store.clearAlert(decodeURIComponent(m[1])); return json(res, 200, { ok: true }); }
     if (p === '/api/alerts/clear-all' && req.method === 'POST') {
       const n = store.listAlerts().length; store.clearAllAlerts(); return json(res, 200, { ok: true, cleared: n });
+    }
+    // ── API：平台设置（LLM 接入）── Key 只进 data/settings.json，读取永远脱敏
+    if (p === '/api/settings' && req.method === 'GET') {
+      return json(res, 200, llmSettings.publicView());
+    }
+    if (p === '/api/settings' && req.method === 'POST') {
+      const body = await readBody(req);
+      llmSettings.set(body);
+      return json(res, 200, llmSettings.publicView());
+    }
+    // 连通性测试：允许用表单里还没保存的值先试（baseUrl/model/apiKey 可覆盖已存配置）
+    if (p === '/api/settings/test' && req.method === 'POST') {
+      const body = await readBody(req);
+      const saved = llmSettings.load();
+      const over = {};
+      if (body.baseUrl) over.baseUrl = body.baseUrl;
+      if (body.model) over.model = body.model;
+      if (body.apiKey && !/^\*{4}/.test(body.apiKey)) over.apiKey = body.apiKey;
+      if (!over.baseUrl && !saved.baseUrl) return json(res, 400, { error: '请先填写 BaseURL' });
+      if (!over.model && !saved.model) return json(res, 400, { error: '请先填写模型名' });
+      try {
+        const r = await llm.testConn(over);
+        return json(res, 200, { ok: true, reply: r.reply, ms: r.ms, usage: r.usage });
+      } catch (e) {
+        return json(res, 502, { error: String(e.message || e) });
+      }
     }
     // ── API：认证凭证（AK/SK）──
     if (p === '/api/creds' && req.method === 'GET') {

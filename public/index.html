@@ -18,6 +18,7 @@
     <button class="tab" data-s="build">搭建器</button>
     <button class="tab" data-s="run">运行观测</button>
     <button class="tab" data-s="news">更新记录</button>
+    <button class="tab" data-s="settings">设置</button>
   </div>
   <span class="env" id="catalogBadge">注册表 · 加载中…</span>
   <button class="theme-toggle" id="btnPlugin" title="Chrome 插件接入 · 访问令牌" aria-label="插件接入">🧩</button>
@@ -169,7 +170,7 @@
 <!-- ═══ 界面 3：搭建器 ═══ --><section id="s-build" class="screen builder">
   <div class="chat" id="buildChat">
     <h3>流程搭建助手 <span class="aitag">Agent · 仅此处使用 LLM</span></h3>
-    <div class="chat-hint">可用接口 <b id="chatApiCount">—</b> 个 · 📖 手册 <b id="chatDocCount">0</b> 篇 · <a onclick="switchTab('api')">接入 / 管理</a></div>
+    <div class="chat-hint">引擎 <b id="chatEngineName">—</b> · 可用接口 <b id="chatApiCount">—</b> 个 · 📖 手册 <b id="chatDocCount">0</b> 篇 · <a onclick="switchTab('settings')">LLM 设置</a> · <a onclick="switchTab('api')">接入 / 管理</a></div>
     <div class="msgs" id="chatMsgs">
       <div class="msg agent">描述你想自动化的接口流程，例如：<br>「供应商准入检查：查供应商 S-8891 状态，如果是 ACTIVE 就把分数同步给 ERP，否则标记拒绝」</div>
     </div>
@@ -429,9 +430,51 @@
   </div>
 </section>
 
+<!-- ═══ 界面 6：设置（LLM 接入）═══ -->
+<section id="s-settings" class="screen settings">
+  <div class="page-head">
+    <div>
+      <h2>设置</h2>
+      <p class="note">LLM 只参与搭建（自然语言 → 流程草稿），运行时仍是纯确定性引擎。未启用或调用失败时，自动回退内置规则引擎。</p>
+    </div>
+    <span style="flex:1"></span>
+    <span class="pill" id="llmStatusPill">引擎 · 检测中…</span>
+    <button class="btn" id="btnLlmTest">🔌 测试连接</button>
+    <button class="btn primary" id="btnLlmSave">保存设置</button>
+  </div>
+  <p class="note" id="llmTestNote" style="margin:-4px 0 12px"></p>
+  <div class="settings-grid">
+    <div class="settings-card">
+      <h3 class="sec">LLM 接入 <span class="note">OpenAI 兼容协议 · DeepSeek / 通义 / Kimi / 内部网关均可</span></h3>
+      <div class="kv">
+        <b>启用</b><label class="switch-row"><input type="checkbox" id="llmEnabled"><span>启用 LLM 搭建 <span class="note">（关闭后始终使用内置规则引擎）</span></span></label>
+        <b>BaseURL</b><input id="llmBaseUrl" placeholder="如 http://llm-gateway.example.com/v1" autocomplete="off">
+        <b>API Key</b><input id="llmApiKey" placeholder="sk-…（网关不鉴权可留空；留空保存 = 不修改已存 Key）" autocomplete="off">
+        <b>模型名</b><input id="llmModel" placeholder="如 moma/glm-5.3-flash" autocomplete="off">
+        <span class="kv-sec">高级参数</span>
+        <b>温度</b><input id="llmTemperature" type="number" min="0" max="2" step="0.1" value="0.2">
+        <b>max_tokens</b><input id="llmMaxTokens" type="number" min="256" max="32768" step="256" value="8192">
+        <b>超时(ms)</b><input id="llmTimeout" type="number" min="3000" max="300000" step="1000" value="180000">
+        <span class="note">温度建议 0~0.5，搭建要稳；推理模型的思考也消耗 token，max_tokens 太小会只输出思考没有内容；网关慢就加大超时。</span>
+      </div>
+    </div>
+    <div class="settings-card">
+      <h3 class="sec">工作方式</h3>
+      <div class="kv">
+        <span class="kv-sec">搭建链路</span>
+        <span class="note"><b>① 搭建</b> —— 对话里的描述 + 接口目录一起发给 LLM，产出严格 DSL 草稿（条件分支、路径参数、Query/Body 都在这一步生成）。</span>
+        <span class="note"><b>② 校验</b> —— 草稿必须通过 Schema 校验（节点 / 连线 / 参数完整性），不合格直接回退规则引擎，不会带着错误上架。</span>
+        <span class="note"><b>③ 三道闸不变</b> —— Schema 校验 → Dry-run → 人工画布确认，LLM 产物同样要过。</span>
+        <span class="kv-sec">安全与运行</span>
+        <span class="note"><b>④ 运行零 LLM</b> —— 发布后的流程由确定性引擎执行，可重放、可审计、零 token 成本。</span>
+        <span class="note"><b>⑤ Key 不出本机</b> —— API Key 只保存在本机 <code>data/settings.json</code>，页面回显与接口返回均为掩码。</span>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- 更新记录原文弹窗 -->
-<div id="newsRawModal" class="modal hidden">
-  <div class="modal-box" style="width:860px;max-height:82vh;display:flex;flex-direction:column">
+<div id="newsRawModal" class="modal hidden">  <div class="modal-box" style="width:860px;max-height:82vh;display:flex;flex-direction:column">
     <div class="modal-head"><b>CHANGELOG.md 原文</b><span style="flex:1"></span>
       <button class="btn" id="newsRawClose">关闭</button></div>
     <pre class="news-raw" id="newsRawText">加载中…</pre>

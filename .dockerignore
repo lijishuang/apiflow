@@ -1,0 +1,11 @@
+# 本机运行时数据不进镜像（流程/运行记录/LLM Key 都在 data，务必用卷挂载）
+data/
+node_modules/
+.git/
+.workbuddy/
+screenshots/
+*.log
+test-*.sh
+.gitignore
+Dockerfile
+docker-compose.yml

@@ -25,6 +25,8 @@ node server.js          # 零依赖，Node 22+（内置 fetch / AbortController�
 # → http://127.0.0.1:3300
 ```
 
+Docker 部署（compose / 原生、数据持久化、升级回滚）见 [docs/deploy-docker.md](docs/deploy-docker.md)。
+
 ## 三大系统（对应设计图五大块）
 
 | 设计图模块 | 实现 |

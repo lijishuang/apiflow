@@ -85,6 +85,7 @@ _tabs.forEach(t => t.addEventListener('click', () => {
   if (t.dataset.s === 'api') loadApi();
   if (t.dataset.s === 'run') refreshRunFlows();
   if (t.dataset.s === 'news') loadNews();
+  if (t.dataset.s === 'settings') loadSettings();
   if (t.dataset.s === 'build') { ensureCreds().then(syncDraftAuth); refreshBuildFlowSel(); }   // 搭建器：认证下拉 + 当前流程下拉
 }));
 window.addEventListener('resize', moveSlider);
@@ -1167,12 +1168,21 @@ function scanRefs(def, nodeId) {
   const byId = Object.fromEntries((def.nodes || []).map(n => [n.id, n]));
   const me = byId[nodeId];
   const upstream = [], downstream = [];
+  // 边映射也是数据引用：map 值里的 {{nodes.x.output…}} 与节点配置同等对待
+  const edgeMaps = (def.edges || []).filter(e => e.map && typeof e.map === 'object')
+    .map(e => ({ text: JSON.stringify(e.map), from: e.from, to: e.to }));
   if (me) {
     for (const m of (JSON.stringify(me.config || {})).matchAll(REF_RE)) if (m[1] !== nodeId) upstream.push({ from: m[1], expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2] });
+    for (const em of edgeMaps) if (em.to === nodeId) {
+      for (const m of em.text.matchAll(REF_RE)) if (m[1] !== nodeId && !upstream.some(u => u.path === m[2])) upstream.push({ from: m[1], expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2], viaMap: true });
+    }
   }
   for (const n of def.nodes || []) {
     if (n.id === nodeId) continue;
     for (const m of (JSON.stringify(n.config || {})).matchAll(REF_RE)) if (m[1] === nodeId) downstream.push({ node: n.id, nodeName: n.name, expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2] });
+  }
+  for (const em of edgeMaps) if (em.from === nodeId) {
+    for (const m of em.text.matchAll(REF_RE)) if (m[1] === nodeId && !downstream.some(x => x.path === m[2] && x.node === em.to)) downstream.push({ node: em.to, nodeName: (byId[em.to] || {}).name, expr: `{{nodes.${m[1]}.${m[2]}}}`, path: m[2], viaMap: true });
   }
   return { upstream, downstream };
 }
@@ -1208,20 +1218,68 @@ function renderResultCard(def, runNodes, meta = {}) {
   return `<div class="result-card ${ok ? '' : 'bad'}">${head}${body}</div>`;
 }
 
-/* 数据流动弹窗：边上传递的数据 + 下游对上游字段的引用关系 */
+/* 数据流动弹窗：边上传递的数据（默认逐字段分框 / 可切 JSON）+ 下游对上游字段的引用关系 */
 function showDataFlow(from, to, dataJson, def) {
   def = def || state.draft || state.def || { nodes: [], edges: [] };
   const byId = Object.fromEntries((def.nodes || []).map(n => [n.id, n]));
   $('#flowTitle').textContent = `数据流动：${(byId[from] || {}).name || from} → ${(byId[to] || {}).name || to}`;
+  const data = tryParse(dataJson);
+  const view = (data === null || data === undefined) ? dataJson : data;   // 摘要截断解析失败时按原文展示
   const refs = scanRefs(def, to).upstream.filter(u => u.from === from);
+  // 映射边：引用路径指向「上游输出」而非映射结果 —— 实际值要从上游节点的真实输出取
+  const edgeMap = ((def.edges || []).find(e => e.from === from && e.to === to) || {}).map || null;
+  const upstreamOut = state.run && state.run.nodes ? (state.run.nodes[from] || {}).output : undefined;
+  const refSrc = edgeMap ? upstreamOut : view;
+  // 「下游引用」标签：整包边按引用路径的顶层字段；映射边按映射配置里出现的字段
+  const refKeys = edgeMap
+    ? new Set(Object.entries(edgeMap).filter(([, v]) => typeof v === 'string' && v.includes('{{nodes.' + from + '.')).map(([k]) => k))
+    : new Set(refs.map(r => String(r.path || '').replace(/^output\.?/, '').split('.')[0]).filter(Boolean));
+  const TYPE_CN = { string: '字符串', number: '数值', boolean: '布尔', object: '对象', array: '数组', null: 'null' };
+  const typeOf = v => v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+  const fieldBox = ([k, v]) => {
+    const t = typeOf(v);
+    const isObj = t === 'object' || t === 'array';
+    const refd = refKeys.has(k);
+    const valHtml = isObj
+      ? `<div class="df-field-json" data-open="0" title="点击展开 / 收起">${hlJson(v)}</div>`
+      : `<div class="df-field-val">${v === null || v === undefined ? '<span class="j-null">null</span>' : esc(typeof v === 'string' ? v : JSON.stringify(v))}</div>`;
+    return `<div class="df-field${refd ? ' df-isref' : ''}">
+      <div class="df-field-head"><span class="df-key">${esc(k)}</span><span class="df-type df-t-${t}">${TYPE_CN[t] || t}</span>${refd ? '<span class="df-reftag" title="下游节点引用了这个字段">↳ 下游引用</span>' : ''}<span style="flex:1"></span><button class="df-copy" data-dfkey="${esc(k)}" title="复制该字段值">⧉</button></div>
+      ${valHtml}
+    </div>`;
+  };
+  const isObjBag = view != null && typeof view === 'object' && !Array.isArray(view);
+  const fieldsHtml = isObjBag ? Object.entries(view).map(fieldBox).join('') : `<div class="df-nofield note">数据不是键值对象（${Array.isArray(view) ? '数组' : typeof view}），按 JSON 查看</div>`;
   $('#flowBody').innerHTML = `
     <p class="note">边上的数据是上游节点 <b>${esc(byId[from] ? byId[from].name : from)}</b> 的输出，执行时会作为下游节点 <b>${esc(byId[to] ? byId[to].name : to)}</b> 的默认输入 —— 下游可用 <code>{{nodes.${esc(from)}.output…}}</code> 精确引用其中的字段。</p>
-    <b style="font-size:12px;color:var(--muted)">传递的数据（完整）</b>
-    <div class="code result-json">${hlJson(tryParse(dataJson))}</div>
+    <div class="df-head-row">
+      <b style="font-size:12px;color:var(--muted)">传递的数据（完整）</b>
+      <span style="flex:1"></span>
+      <div class="df-toggle" role="tablist">
+        <button class="df-tg on" data-dfview="fields">字段</button>
+        <button class="df-tg" data-dfview="json">JSON</button>
+      </div>
+    </div>
+    <div data-dfpane="fields">${fieldsHtml}</div>
+    <div data-dfpane="json" style="display:none"><div class="code result-json">${hlJson(view)}</div></div>
     <b style="font-size:12px;color:var(--muted);display:block;margin-top:12px">依赖关系</b>
     ${refs.length ? `<table class="dep-table"><thead><tr><th>下游节点引用的上游字段</th><th>实际值</th></tr></thead>
-      <tbody>${refs.map(r => `<tr><td><code>${esc(r.expr)}</code></td><td class="num">${esc(JSON.stringify(lookupPath(tryParse(dataJson), r.path.replace(/^output\.?/, ''))) ?? '—')}</td></tr>`).join('')}</tbody></table>`
+      <tbody>${refs.map(r => `<tr><td><code>${esc(r.expr)}</code></td><td class="num">${esc(JSON.stringify(lookupPath(refSrc, r.path.replace(/^output\.?/, ''))) ?? '—')}</td></tr>`).join('')}</tbody></table>`
       : '<p class="note">下游节点没有直接引用本节点输出的具体字段（当前是把上游输出整包作为默认输入）。</p>'}`;
+  // 交互：视图切换 / 字段 JSON 框展开收起 / 单字段复制
+  const body = $('#flowBody');
+  body.querySelectorAll('.df-tg').forEach(btn => btn.onclick = () => {
+    body.querySelectorAll('.df-tg').forEach(b => b.classList.toggle('on', b === btn));
+    const vm = btn.dataset.dfview;
+    body.querySelectorAll('[data-dfpane]').forEach(p => p.style.display = p.dataset.dfpane === vm ? '' : 'none');
+  });
+  body.querySelectorAll('.df-field-json').forEach(box => box.onclick = () => box.dataset.open = box.dataset.open === '1' ? '0' : '1');
+  body.querySelectorAll('.df-copy').forEach(btn => btn.onclick = () => {
+    const v = view && typeof view === 'object' ? view[btn.dataset.dfkey] : undefined;
+    navigator.clipboard.writeText(JSON.stringify(v, null, 1)).then(() => {
+      btn.textContent = '✓'; setTimeout(() => { btn.textContent = '⧉'; }, 1200);
+    }).catch(() => {});
+  });
   $('#flowModal').classList.remove('hidden');
 }
 /* 结果卡「复制 JSON」：事件委托（结果卡在搭建器与运行观测两处出现） */
@@ -2119,18 +2177,35 @@ function addSuggestions(list) {
   $('#chatMsgs').appendChild(d);
   $('#chatMsgs').scrollTop = 1e6;
 }
-async function sendBuildText() {
-  const text = $('#chatText').value.trim();
+/* 对话历史：随每次搭建请求发给 LLM（服务端截取最近 6 轮），反问/选择/结果都进历史，
+   这样「助手提问 → 用户点选 → 生成」在模型侧是同一条上下文 */
+function pushHist(role, text) {
+  if (!state.chatHist) state.chatHist = [];
+  state.chatHist.push({ role, text: String(text || '').slice(0, 400) });
+  if (state.chatHist.length > 12) state.chatHist = state.chatHist.slice(-12);
+}
+async function sendBuildText(forced) {
+  const text = (forced != null ? String(forced) : $('#chatText').value).trim();
   if (!text) return;
   $('#chatText').value = '';
   addChat('user', text);
+  pushHist('user', text);
+  // 上一轮的提问已得到回应，选项卡片失效
+  document.querySelectorAll('#chatMsgs .ask-card:not(.answered)').forEach(c => c.classList.add('answered'));
   const btn = $('#btnSend');
   btn.disabled = true;
   try {
-    const res = await api('/api/agent/draft', { method: 'POST', body: JSON.stringify({ text, flowId: state.draftFlowId, history: [] }) });
+    const res = await api('/api/agent/draft', { method: 'POST', body: JSON.stringify({ text, flowId: state.draftFlowId, history: state.chatHist || [] }) });
+    if (res.ask) {                        // LLM 反问：渲染可点选的选项卡片，等用户表态
+      renderAskCard(res.ask);
+      addRefs(res.references);
+      return;
+    }
     state.draftFlowId = res.flow.id;
     state.draft = res.draft;
     addChat('agent', res.explanation);
+    pushHist('agent', res.explanation);
+    if (res.llmError) addChat('agent', '⚠ LLM 生成失败，本次由内置规则引擎完成：' + res.llmError);
     addRefs(res.references);
     addDocRefs(res.docRefs);
     $('#dbgInput').value = '';
@@ -2145,6 +2220,26 @@ async function sendBuildText() {
   } finally {
     btn.disabled = false;
   }
+}
+/* LLM 反问卡片：问题 + 2~4 个带说明的选项，点选即回复（也可以直接打字） */
+function renderAskCard(ask) {
+  const d = document.createElement('div');
+  d.className = 'msg agent ask-card';
+  d.innerHTML = `<div class="ask-q">🤔 ${esc(ask.question)}</div>` +
+    ask.options.map((o, i) =>
+      `<button class="ask-opt" data-i="${i}"><b>${esc(o.label)}</b>${o.detail ? `<span class="note">${esc(o.detail)}</span>` : ''}</button>`).join('') +
+    `<div class="note" style="margin-top:8px">点选项直接采用${ask.freeHint ? `；${esc(ask.freeHint)}` : '，或直接打字说明你的想法'}。</div>`;
+  d.querySelectorAll('.ask-opt').forEach(b => {
+    b.onclick = () => {
+      if (d.classList.contains('answered')) return;
+      d.classList.add('answered');
+      b.classList.add('picked');
+      const o = ask.options[Number(b.dataset.i)] || {};
+      sendBuildText(o.label);   // 把选项原文作为回复发回，模型在上下文里能看到自己的提问
+    };
+  });
+  $('#chatMsgs').appendChild(d);
+  $('#chatMsgs').scrollTop = 1e6;
 }
 $('#btnSend').onclick = sendBuildText;
 $('#chatText').addEventListener('keydown', e => {
@@ -2680,6 +2775,50 @@ function paintRunState(el, def, run) {
     else if (st === 'skipped') meta.innerHTML = '<span class="note">分支未命中</span>';
     else meta.innerHTML = '<span class="note">排队</span>';
   }
+  paintEdgeChips(el, run, def);
+}
+/* 用「边映射 + 各节点真实输出」重建映射边的完整传递数据（事件里只有 160 字摘要） */
+function renderEdgeMapFull(map, runNodes) {
+  const ctxLookup = path => {
+    const m = String(path).match(/^nodes\.([\w-]+)\.output\.(.+)$/);
+    if (m) return lookupPath((runNodes[m[1]] || {}).output, m[2]);
+    return undefined;   // 非 nodes.* 引用（input/run 等）重建不了，保留原样
+  };
+  const deep = v => {
+    if (typeof v === 'string') {
+      const w = v.match(/^\{\{([^}]+)\}\}$/);   // 整体引用保留类型
+      if (w) { const val = ctxLookup(w[1].trim()); return val === undefined ? v : val; }
+      return v.replace(/\{\{([^}]+)\}\}/g, (_, p) => { const val = ctxLookup(p.trim()); return val === undefined ? '' : String(val); });
+    }
+    if (Array.isArray(v)) return v.map(deep);
+    if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = deep(x); return o; }
+    return v;
+  };
+  return deep(map);
+}
+/* 边上数据 chip 回填：实时跑由 SSE 逐条填充，历史/重放 run 要从 run.events 回填，
+   否则打开过去的运行时数据传递 chip 全是隐藏的（chip 创建时 display:none）。 */
+function paintEdgeChips(el, run, def) {
+  if (!el || !run || !run.events || !run.events.length) return;
+  const edgeMap = {};
+  for (const e of (def && def.edges) || []) if (e.map && typeof e.map === 'object') edgeMap[e.from + '->' + e.to] = e.map;
+  const last = {};   // 同一条边可能多次传递（循环），取最后一次
+  for (const p of run.events) {
+    if (p.event === 'edge_data' && p.data && p.data.from) last[p.data.from + '->' + p.data.to] = p.data;
+  }
+  for (const [key, d] of Object.entries(last)) {
+    const chip = el.querySelector(`[data-edge="${key}"]`);
+    if (!chip) continue;
+    // 事件里只有 160 字摘要：无映射边取上游节点完整输出；映射边用边映射 + 节点输出重建
+    let full = d.data;
+    try {
+      if (d.mapped && edgeMap[key]) full = JSON.stringify(renderEdgeMapFull(edgeMap[key], run.nodes || {}));
+      else if (!d.mapped && run.nodes && run.nodes[d.from] && run.nodes[d.from].output != null) full = JSON.stringify(run.nodes[d.from].output);
+    } catch { /* 摘要兜底 */ }
+    chip.style.display = 'block';
+    chip.textContent = (d.mapped ? '\u26a1' : '') + d.data;
+    chip.dataset.full = full;
+  }
 }
 function fmtEvent(p) {
   const t = new Date(p.ts).toISOString().slice(11, 23);
@@ -2774,6 +2913,7 @@ function connectSSE() {
         // run_end 时 SSE 里的节点输出是 160 字摘要 —— 拉一次完整 run 记录，刷新结果卡
         api('/api/runs/' + run.id).then(full => {
           run.nodes = full.nodes || run.nodes;
+          run.events = full.events || run.events;   // 供边 chip 回填完整传递数据
           paintRunState($('#runCanvas'), def, run);
           showRunResult(run);
         }).catch(() => showRunResult(run));
@@ -4416,6 +4556,58 @@ if ($('#newsRawBtn')) $('#newsRawBtn').onclick = async () => {
 if ($('#newsRawClose')) $('#newsRawClose').onclick = () => $('#newsRawModal').classList.add('hidden');
 $('#newsRawModal')?.addEventListener('click', e => { if (e.target.id === 'newsRawModal') $('#newsRawModal').classList.add('hidden'); });
 
+/* ───────── 界面 6：设置（LLM 接入）───────── */
+function llmFormValues() {
+  return {
+    enabled: $('#llmEnabled').checked,
+    baseUrl: $('#llmBaseUrl').value.trim(),
+    apiKey: $('#llmApiKey').value.trim(),       // 掩码回显原样传回，后端识别后不覆盖真 Key
+    model: $('#llmModel').value.trim(),
+    temperature: $('#llmTemperature').value,
+    maxTokens: $('#llmMaxTokens').value,
+    timeoutMs: $('#llmTimeout').value,
+  };
+}
+function applySettingsView(s) {
+  $('#llmEnabled').checked = s.enabled;
+  $('#llmBaseUrl').value = s.baseUrl || '';
+  $('#llmApiKey').value = s.apiKey || '';
+  $('#llmApiKey').placeholder = s.hasKey ? `已保存（${s.apiKey}）· 留空表示不修改` : 'sk-…（网关不鉴权可留空）';
+  $('#llmModel').value = s.model || '';
+  $('#llmTemperature').value = s.temperature;
+  $('#llmMaxTokens').value = s.maxTokens;
+  $('#llmTimeout').value = s.timeoutMs;
+  const p = $('#llmStatusPill');
+  if (s.ready) { p.textContent = '引擎 · LLM（' + s.model + '）'; p.style.background = 'var(--teal-bg)'; p.style.color = 'var(--teal)'; }
+  else { p.textContent = '引擎 · 内置规则'; p.style.background = ''; p.style.color = ''; }
+  const badge = $('#chatEngineName');
+  if (badge) { badge.textContent = s.ready ? 'LLM' : '规则'; badge.title = s.ready ? 'LLM 搭建：' + s.model : '未启用 LLM，使用内置规则引擎'; }
+}
+async function loadSettings() {
+  try { applySettingsView(await api('/api/settings')); }
+  catch (e) { $('#llmTestNote').textContent = '⚠ 加载设置失败：' + e.message; }
+}
+if ($('#btnLlmSave')) $('#btnLlmSave').onclick = async () => {
+  const note = $('#llmTestNote');
+  try {
+    const s = await api('/api/settings', { method: 'POST', body: JSON.stringify(llmFormValues()) });
+    applySettingsView(s);
+    note.textContent = '✓ 已保存' + (s.ready ? '，搭建对话现在走 LLM（' + s.model + '）' : '，当前使用内置规则引擎');
+  } catch (e) { note.textContent = '⚠ 保存失败：' + e.message; }
+};
+if ($('#btnLlmTest')) $('#btnLlmTest').onclick = async () => {
+  const note = $('#llmTestNote');
+  note.textContent = '测试中…（最长等 20s）';
+  const v = llmFormValues();
+  try {
+    const r = await api('/api/settings/test', {
+      method: 'POST',
+      body: JSON.stringify({ baseUrl: v.baseUrl, model: v.model, apiKey: /^\*{4}/.test(v.apiKey) ? undefined : v.apiKey }),
+    });
+    note.textContent = `✓ 连接正常：模型回复「${r.reply}」（${(r.ms / 1000).toFixed(1)}s，tokens ${r.usage.total_tokens ?? '—'}）`;
+  } catch (e) { note.textContent = '✗ 连接失败：' + e.message; }
+};
+
 /* 启动 */
 (async () => {
   await Promise.all([loadFlows(), loadHome()]);   // 首页为默认页，同时预热流程列表数据
@@ -4428,4 +4620,5 @@ $('#newsRawModal')?.addEventListener('click', e => { if (e.target.id === 'newsRa
     _catalogVersion = c.version;
   } catch {}
   connectSSE();
+  api('/api/settings').then(applySettingsView).catch(() => {});   // 引擎徽标（搭建器顶部）启动即同步
 })();
