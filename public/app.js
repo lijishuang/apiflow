@@ -477,7 +477,7 @@ function renderFlowPanel() {
     <div class="panel-sec">
       <p class="ph-label">测试报告</p>
       <button class="btn wide" id="fpReport" ${f.version > 0 ? '' : 'disabled'}>📋 生成测试报告</button>
-      <p class="note">根据运行记录自动生成：单次明细或最近运行汇总（通过率 / 高频失败节点 / 建议），可下载 Markdown / HTML 归档。</p>
+      <p class="note">最近运行汇总 + 最近一次运行的完整明细（每个接口的请求 / 响应 / 断言 / 重试记录），失败时附报错详情与 AI 初步分析。可下载 Markdown / HTML / Word / PDF 或在线打开。</p>
     </div>
     <div class="panel-sec">
       <p class="ph-label">对比定位差异</p>
@@ -3021,24 +3021,81 @@ function downloadText(name, mime, text) {
 let _report = null;   // 当前弹窗 { kind, id, rep, md, html }
 const reportName = (rep, ext) =>
   `APIFlow测试报告-${rep.flowName}-${rep.kind === 'run' ? '运行#' + rep.num : '汇总'}.${ext}`.replace(/[\\/:*?"<>| ]/g, '_');
+const reportPath = () => `${_report.kind === 'run' ? '/api/runs/' : '/api/flows/'}${_report.id}/report`;
+// AI 初步分析：失败运行时异步拉取，注入报告 iframe 内的 AI 卡片（服务端带缓存，重复打开不重复调用）
+async function loadAiAnalysis(runId, frame) {
+  const win = frame.contentWindow;
+  if (!win || typeof win.renderAiAnalysis !== 'function') return;
+  try {
+    const d = await api(`/api/runs/${runId}/analysis`);
+    win.renderAiAnalysis(d);
+    const rf = frame.contentDocument.getElementById('aiRefresh');
+    if (rf) rf.onclick = async () => {
+      rf.textContent = '分析中…';
+      try { win.renderAiAnalysis(await api(`/api/runs/${runId}/analysis?refresh=1`)); }
+      catch (e) { toast('AI 分析失败：' + e.message, 'bad'); }
+    };
+  } catch { /* 静默：AI 卡片保持占位文案 */ }
+}
 async function openReportModal(kind, id) {
   const rep = await api(kind === 'run' ? `/api/runs/${id}/report?format=json` : `/api/flows/${id}/report?format=json`);
-  _report = { kind, id, rep, md: null, html: null };
+  // 汇总报告分析「最近一次失败运行」，单次报告分析本次运行
+  const aiRunId = kind === 'run' ? (rep.passed === false ? (rep.runId || id) : null) : (rep.lastFailRunId || null);
+  _report = { kind, id, rep, md: null, html: null, aiPending: !!aiRunId, aiRunId };
   $('#reportTitle').textContent = `测试报告 · ${rep.flowName}` +
     (kind === 'run' ? ` · 运行 #${rep.num} · ${rep.passed ? '✅ 通过' : '❌ 未通过'}` : ` · 最近 ${rep.window.total} 次汇总`);
-  $('#reportFrame').srcdoc = '<p style="font:13px sans-serif;color:#667;padding:16px">报告生成中…</p>';
+  const frame = $('#reportFrame');
+  frame.onload = () => { if (_report && _report.aiPending) loadAiAnalysis(_report.aiRunId, frame); };
+  frame.srcdoc = '<p style="font:13px sans-serif;color:#667;padding:16px">报告生成中…</p>';
   $('#reportModal').classList.remove('hidden');
-  $('#reportFrame').srcdoc = await apiText(`${kind === 'run' ? '/api/runs/' + id + '/report' : '/api/flows/' + id + '/report'}?format=html`);
-  _report.html = $('#reportFrame').srcdoc;
+  frame.srcdoc = await apiText(`${kind === 'run' ? '/api/runs/' + id + '/report' : '/api/flows/' + id + '/report'}?format=html`);
+  _report.html = frame.srcdoc;
+  // srcdoc 加载完成前 onload 已注册；若此时已加载完（缓存命中场景）则直接补一次
+  if (_report.aiPending && frame.contentWindow && typeof frame.contentWindow.renderAiAnalysis === 'function')
+    loadAiAnalysis(_report.aiRunId, frame);
 }
 $('#reportDlMd').onclick = async () => {
   if (!_report) return;
-  const md = _report.md || (_report.md = await apiText(`${_report.kind === 'run' ? '/api/runs/' + _report.id + '/report' : '/api/flows/' + _report.id + '/report'}?format=md`));
+  const md = _report.md || (_report.md = await apiText(reportPath() + '?format=md'));
   downloadText(reportName(_report.rep, 'md'), 'text/markdown', md);
 };
 $('#reportDlHtml').onclick = () => {
   if (!_report || !_report.html) return;
   downloadText(reportName(_report.rep, 'html'), 'text/html', _report.html);
+};
+// Word（.docx）：服务端零依赖生成的 OOXML 二进制，Blob 下载
+$('#reportDlDocx').onclick = async () => {
+  if (!_report) return toast('请先生成报告', 'bad');
+  try {
+    const r = await fetch(reportPath() + '?format=docx');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = reportName(_report.rep, 'docx');
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast('Word 报告已下载', 'ok');
+  } catch (e) { toast('Word 下载失败：' + e.message, 'bad'); }
+};
+// PDF：把报告 HTML 放进隐藏 iframe 调系统打印 —— 打印对话框选「存储为 PDF」
+// 报告内置 beforeprint 钩子，打印前自动展开全部 details，内容完整
+$('#reportDlPdf').onclick = () => {
+  if (!_report || !_report.html) return toast('请先生成报告', 'bad');
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;opacity:0;border:0';
+  f.srcdoc = _report.html;
+  f.onload = () => {
+    try { f.contentWindow.focus(); f.contentWindow.print(); }
+    catch (e) { toast('打印调起失败：' + e.message, 'bad'); }
+    setTimeout(() => f.remove(), 120000);   // 打印对话框停留期间保留 iframe
+  };
+  document.body.appendChild(f);
+};
+// 在线打开：报告 HTML 是同源独立页面，新标签页直接呈现（页面右上角自带「导出 PDF」按钮）
+$('#reportOpenHtml').onclick = () => {
+  if (!_report) return;
+  window.open(reportPath() + '?format=html', '_blank');
 };
 $('#btnCmp').onclick = () => {
   const a = $('#cmpA').value, b = $('#cmpB').value;

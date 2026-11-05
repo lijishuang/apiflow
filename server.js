@@ -22,6 +22,7 @@ const paramhint = require('./lib/paramhint');
 const schema = require('./lib/schema');
 const changelog = require('./lib/changelog');
 const report = require('./lib/report');
+const analysis = require('./lib/analysis');
 const { createCred, updateCred, maskSk, deleteCred, verify, bodyHash } = require('./lib/auth');
 const access = require('./lib/access');
 const intent = require('./lib/intent');
@@ -1440,6 +1441,17 @@ const server = http.createServer(async (req, res) => {
       const def = r.version > 0 ? (f && f.published && f.published.def) : (f && f.draft && f.draft.def);
       const rep = report.buildRun(r, def);
       return report.respond(res, rep, url.searchParams.get('format') || 'md', url.searchParams.get('download') === '1');
+    }
+    // AI 初步失败分析：LLM 解读失败节点的请求/响应/断言，结果缓存（?refresh=1 重算）
+    if ((m = p.match(/^\/api\/runs\/([\w-]+)\/analysis$/)) && req.method === 'GET') {
+      const r = store.getRun(m[1]);
+      if (!r) return json(res, 404, { error: 'run not found' });
+      const f = store.getFlow(r.flowId);
+      const def = r.version > 0 ? (f && f.published && f.published.def) : (f && f.draft && f.draft.def);
+      const rep = report.buildRun(r, def);
+      const a = await analysis.analyzeRun(r.id, rep, url.searchParams.get('refresh') === '1');
+      if (a.ok && a.analysis) a.html = report.aiInnerHtml(a.analysis);
+      return json(res, 200, a);
     }
     if ((m = p.match(/^\/api\/flows\/([\w-]+)\/report$/)) && req.method === 'GET') {
       const f = store.getFlow(m[1]);
